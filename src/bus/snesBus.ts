@@ -1,13 +1,14 @@
 import { IMemoryBus, Byte, Word } from '../emulator/types';
 import { Cartridge } from '../cart/cartridge';
+import { PPU } from '../ppu/ppu';
 
 // Partial SNES Bus focusing on ROM, WRAM, MMIO, and basic DMA for tests.
 export class SNESBus implements IMemoryBus {
   // 128 KiB WRAM at 0x7E:0000-0x7F:FFFF
   private wram = new Uint8Array(128 * 1024);
 
-  // Minimal MMIO register space for $2100-$21FF (PPU range) used by DMA tests
-  private ppuRegs = new Uint8Array(0x100);
+  // PPU device handling $2100-$21FF
+  private ppu = new PPU();
 
   // DMA channel registers (8 channels, base $4300 + 0x10*ch)
   private dmap = new Uint8Array(8);   // $43x0
@@ -34,7 +35,7 @@ export class SNESBus implements IMemoryBus {
 
     // PPU MMIO $2100-$21FF
     if ((off & 0xff00) === 0x2100) {
-      return this.ppuRegs[off & 0x00ff];
+      return this.ppu.readReg(off & 0x00ff);
     }
 
     // APU/io ranges not implemented for read
@@ -112,7 +113,7 @@ export class SNESBus implements IMemoryBus {
 
     // PPU MMIO $2100-$21FF
     if ((off & 0xff00) === 0x2100) {
-      this.ppuRegs[off & 0x00ff] = value & 0xff;
+      this.ppu.writeReg(off & 0x00ff, value & 0xff);
       return;
     }
 
