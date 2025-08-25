@@ -1,0 +1,24 @@
+{
+  "name": "ai-snes-gpt5",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --reporter=dot",
+    "test:watch": "vitest --watch",
+    "lint": "eslint .",
+    "format": "prettier -w ."
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1",
+    "ts-node": "^10.9.2"
+  }
+}
+

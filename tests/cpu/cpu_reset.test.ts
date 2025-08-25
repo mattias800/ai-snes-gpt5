@@ -1,0 +1,44 @@
+import { describe, it, expect } from 'vitest';
+import { CPU65C816, Flag } from '../../src/cpu/cpu65c816';
+import { TestMemoryBus } from '../../src/bus/testMemoryBus';
+
+function writeResetVector(bus: TestMemoryBus, addr: number) {
+  // Write little-endian PC to 0x00:FFFC/FFFD in our flat memory space
+  bus.write8(0x00fffffc, addr & 0xff);
+  bus.write8(0x00fffffd, (addr >>> 8) & 0xff);
+}
+
+describe('CPU65C816 reset and NOP', () => {
+  it('resets to emulation mode, sets SP high byte to 0x01, sets M and X flags, and jumps to vector', () => {
+    const bus = new TestMemoryBus();
+    writeResetVector(bus, 0x8000);
+    // Place a NOP at reset vector
+    bus.write8(0x00800000 | 0x8000, 0xea);
+
+    const cpu = new CPU65C816(bus);
+    cpu.reset();
+
+    expect(cpu.state.E).toBe(true);
+    expect((cpu.state.P & Flag.M) !== 0).toBe(true);
+    expect((cpu.state.P & Flag.X) !== 0).toBe(true);
+    expect((cpu.state.P & Flag.D) === 0).toBe(true);
+    expect(cpu.state.S >>> 8).toBe(0x01);
+    expect(cpu.state.PBR).toBe(0x00);
+    expect(cpu.state.PC).toBe(0x8000);
+
+    // Execute NOP and ensure PC advanced
+    cpu.stepInstruction();
+    expect(cpu.state.PC).toBe(0x8001);
+  });
+
+  it('throws on unimplemented opcode', () => {
+    const bus = new TestMemoryBus();
+    writeResetVector(bus, 0x1234);
+    bus.write8(0x00000000 | 0x1234, 0x00); // BRK in 6502, not implemented yet
+
+    const cpu = new CPU65C816(bus);
+    cpu.reset();
+    expect(() => cpu.stepInstruction()).toThrowError(/Unimplemented opcode/);
+  });
+});
+
