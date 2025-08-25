@@ -281,12 +281,17 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
   // Windowing: two inclusive ranges A[wh0..wh1] and B[wh2..wh3].
   // W12SEL/W34SEL/WOBJSEL enable gating per layer but we only support A/B with OR/AND/XOR/XNOR via CGWSEL bits 6-7.
   // cgwsel bit0: 0 = apply outside combined window, 1 = inside combined window
-  const aLeft = Math.min(ppu.wh0, ppu.wh1) >>> 0;
-  const aRight = Math.max(ppu.wh0, ppu.wh1) >>> 0;
-  const bLeft = Math.min(ppu.wh2, ppu.wh3) >>> 0;
-  const bRight = Math.max(ppu.wh2, ppu.wh3) >>> 0;
-  function inA(x: number): boolean { return x >= aLeft && x <= aRight; }
-  function inB(x: number): boolean { return x >= bLeft && x <= bRight; }
+  const aL = (ppu.wh0 & 0xff) >>> 0;
+  const aR = (ppu.wh1 & 0xff) >>> 0;
+  const bL = (ppu.wh2 & 0xff) >>> 0;
+  const bR = (ppu.wh3 & 0xff) >>> 0;
+  function inRangeWrap(x: number, L: number, R: number): boolean {
+    if (L <= R) return x >= L && x <= R;
+    // wrap-around case: inside if x >= L OR x <= R
+    return x >= L || x <= R;
+  }
+  function inA(x: number): boolean { return inRangeWrap(x, aL, aR); }
+  function inB(x: number): boolean { return inRangeWrap(x, bL, bR); }
   const comb = (ppu.cgwsel >> 6) & 0x03; // 00=OR,01=AND,10=XOR,11=XNOR
   function combineWin(ax: boolean, bx: boolean): boolean {
     switch (comb) {
