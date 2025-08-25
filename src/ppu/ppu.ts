@@ -9,6 +9,10 @@ export class PPU {
   // MMIO mirrors for last written values (for tests and DMA readability)
   private regs = new Uint8Array(0x100);
 
+  // Minimal timing counters for tests
+  public scanline = 0; // 0..261
+  public frame = 0;
+
   // VRAM addressing
   private vmain = 0x00; // $2115
   private vaddr = 0x0000; // $2116/7 (word address)
@@ -49,6 +53,18 @@ export class PPU {
   }
   inspectOAMByte(addr: number): number {
     return this.oam[addr % 544];
+  }
+
+  // Timing hooks (minimal)
+  startFrame(): void {
+    this.scanline = 0;
+  }
+  endScanline(): void {
+    this.scanline++;
+    if (this.scanline >= 262) {
+      this.frame++;
+      this.scanline = 0;
+    }
   }
 
   // MMIO read/write entry points (addr is low byte 0x00..0xFF for $21xx)
