@@ -1,5 +1,6 @@
 import { PPU } from './ppu';
 import { render4bppTileIndices } from './renderer';
+import { decodeSNESColorToRGBA } from './palette';
 
 // Render a 4bpp BG tilemap region into palette indices.
 // - mapBaseWordAddr: VRAM word address of the tilemap base (assumed 32x32 entries)
@@ -38,6 +39,20 @@ export function renderBG4bppTilemapIndices(
     }
   }
 
+  return out;
+}
+
+// Render BG1 to an RGBA Uint8ClampedArray using CGRAM palette colors.
+export function renderBG1RegionRGBA(ppu: PPU, widthPixels: number, heightPixels: number): Uint8ClampedArray {
+  const indices = renderBG1RegionIndices(ppu, widthPixels, heightPixels);
+  const out = new Uint8ClampedArray(widthPixels * heightPixels * 4);
+  for (let i = 0; i < indices.length; i++) {
+    const palIdx = indices[i] & 0xff; // 0..127 typical for 4bpp BG1 with palette groups
+    const color = ppu.inspectCGRAMWord(palIdx);
+    const { r, g, b, a } = decodeSNESColorToRGBA(color);
+    const o = i * 4;
+    out[o] = r; out[o + 1] = g; out[o + 2] = b; out[o + 3] = a;
+  }
   return out;
 }
 
