@@ -128,6 +128,44 @@ export class CPU65C816 {
     this.setZNFromValue(res, this.m8 ? 8 : 16);
   }
 
+  private aslA(): void {
+    const a = this.state.A & 0xff;
+    const c = (a & 0x80) !== 0;
+    const res = (a << 1) & 0xff;
+    if (c) this.state.P |= Flag.C; else this.state.P &= ~Flag.C;
+    this.state.A = (this.state.A & 0xff00) | res;
+    this.setZNFromValue(res, 8);
+  }
+
+  private lsrA(): void {
+    const a = this.state.A & 0xff;
+    const c = (a & 0x01) !== 0;
+    const res = (a >>> 1) & 0xff;
+    if (c) this.state.P |= Flag.C; else this.state.P &= ~Flag.C;
+    this.state.A = (this.state.A & 0xff00) | res;
+    this.setZNFromValue(res, 8);
+  }
+
+  private rolA(): void {
+    const a = this.state.A & 0xff;
+    const carryIn = (this.state.P & Flag.C) ? 1 : 0;
+    const newC = (a & 0x80) !== 0;
+    const res = ((a << 1) & 0xff) | carryIn;
+    if (newC) this.state.P |= Flag.C; else this.state.P &= ~Flag.C;
+    this.state.A = (this.state.A & 0xff00) | res;
+    this.setZNFromValue(res, 8);
+  }
+
+  private rorA(): void {
+    const a = this.state.A & 0xff;
+    const carryIn = (this.state.P & Flag.C) ? 0x80 : 0;
+    const newC = (a & 0x01) !== 0;
+    const res = ((a >>> 1) | carryIn) & 0xff;
+    if (newC) this.state.P |= Flag.C; else this.state.P &= ~Flag.C;
+    this.state.A = (this.state.A & 0xff00) | res;
+    this.setZNFromValue(res, 8);
+  }
+
   private updateWidthConstraintsForE(): void {
     if (this.state.E) {
       // In emulation, M and X forced to 1 (8-bit)
@@ -199,6 +237,20 @@ export class CPU65C816 {
         break;
       }
 
+      // Shifts/rotates accumulator (E-mode, 8-bit)
+      case 0x0a: // ASL A
+        this.aslA();
+        break;
+      case 0x4a: // LSR A
+        this.lsrA();
+        break;
+      case 0x2a: // ROL A
+        this.rolA();
+        break;
+      case 0x6a: // ROR A
+        this.rorA();
+        break;
+
       // CLC / SEC (clear/set carry)
       case 0x18: // CLC
         this.state.P &= ~Flag.C;
@@ -257,11 +309,30 @@ export class CPU65C816 {
         break;
       }
 
+      // LDA abs,X
+      case 0xbd: {
+        const addr = this.fetch16();
+        const eff = (addr + (this.state.X & 0xff)) & 0xffff;
+        const value = this.read8(this.state.DBR, eff);
+        this.state.A = (this.state.A & 0xff00) | value;
+        this.setZNFromValue(value, 8);
+        break;
+      }
+
       // STA abs (DBR:addr)
       case 0x8d: {
         const addr = this.fetch16();
         const value = this.state.A & 0xff; // E-mode (8-bit)
         this.write8(this.state.DBR, addr, value);
+        break;
+      }
+
+      // STA abs,X
+      case 0x9d: {
+        const addr = this.fetch16();
+        const eff = (addr + (this.state.X & 0xff)) & 0xffff;
+        const value = this.state.A & 0xff;
+        this.write8(this.state.DBR, eff, value);
         break;
       }
 
@@ -302,11 +373,33 @@ export class CPU65C816 {
         this.state.PC = target;
         break;
       }
+      case 0x4c: { // JMP abs
+        const target = this.fetch16();
+        this.state.PC = target;
+        break;
+      }
       case 0x60: { // RTS
         const lo = this.pull8();
         const hi = this.pull8();
         const addr = ((hi << 8) | lo) & 0xffff;
         this.state.PC = (addr + 1) & 0xffff;
+        break;
+      }
+
+      // Direct page LDA/STA (D + dp, bank 0)
+      case 0xa5: { // LDA dp
+        const dp = this.fetch8();
+        const eff = (this.state.D + dp) & 0xffff;
+        const value = this.read8(0x00, eff);
+        this.state.A = (this.state.A & 0xff00) | value;
+        this.setZNFromValue(value, 8);
+        break;
+      }
+      case 0x85: { // STA dp
+        const dp = this.fetch8();
+        const eff = (this.state.D + dp) & 0xffff;
+        const value = this.state.A & 0xff;
+        this.write8(0x00, eff, value);
         break;
       }
 
