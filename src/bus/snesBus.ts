@@ -10,6 +10,11 @@ export class SNESBus implements IMemoryBus {
   // PPU device handling $2100-$21FF
   private ppu = new PPU();
 
+  // Expose PPU for integration tests and emulator orchestration
+  public getPPU(): PPU {
+    return this.ppu;
+  }
+
   // DMA channel registers (8 channels, base $4300 + 0x10*ch)
   private dmap = new Uint8Array(8);   // $43x0
   private bbad = new Uint8Array(8);   // $43x1
