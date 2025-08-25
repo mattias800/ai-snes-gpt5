@@ -284,7 +284,7 @@ export class CPU65C816 {
         break;
       }
 
-      // BEQ rel8 / BNE rel8
+      // BEQ/BNE/BCC/BCS/BPL/BMI relative
       case 0xf0: { // BEQ
         const off = this.fetch8() << 24 >> 24; // sign-extend
         if ((this.state.P & Flag.Z) !== 0) {
@@ -297,6 +297,26 @@ export class CPU65C816 {
         if ((this.state.P & Flag.Z) === 0) {
           this.state.PC = (this.state.PC + off) & 0xffff;
         }
+        break;
+      }
+      case 0x90: { // BCC
+        const off = this.fetch8() << 24 >> 24;
+        if ((this.state.P & Flag.C) === 0) this.state.PC = (this.state.PC + off) & 0xffff;
+        break;
+      }
+      case 0xb0: { // BCS
+        const off = this.fetch8() << 24 >> 24;
+        if ((this.state.P & Flag.C) !== 0) this.state.PC = (this.state.PC + off) & 0xffff;
+        break;
+      }
+      case 0x10: { // BPL
+        const off = this.fetch8() << 24 >> 24;
+        if ((this.state.P & Flag.N) === 0) this.state.PC = (this.state.PC + off) & 0xffff;
+        break;
+      }
+      case 0x30: { // BMI
+        const off = this.fetch8() << 24 >> 24;
+        if ((this.state.P & Flag.N) !== 0) this.state.PC = (this.state.PC + off) & 0xffff;
         break;
       }
 
@@ -319,6 +339,16 @@ export class CPU65C816 {
         break;
       }
 
+      // LDA abs,Y
+      case 0xb9: {
+        const addr = this.fetch16();
+        const eff = (addr + (this.state.Y & 0xff)) & 0xffff;
+        const value = this.read8(this.state.DBR, eff);
+        this.state.A = (this.state.A & 0xff00) | value;
+        this.setZNFromValue(value, 8);
+        break;
+      }
+
       // STA abs (DBR:addr)
       case 0x8d: {
         const addr = this.fetch16();
@@ -331,6 +361,15 @@ export class CPU65C816 {
       case 0x9d: {
         const addr = this.fetch16();
         const eff = (addr + (this.state.X & 0xff)) & 0xffff;
+        const value = this.state.A & 0xff;
+        this.write8(this.state.DBR, eff, value);
+        break;
+      }
+
+      // STA abs,Y
+      case 0x99: {
+        const addr = this.fetch16();
+        const eff = (addr + (this.state.Y & 0xff)) & 0xffff;
         const value = this.state.A & 0xff;
         this.write8(this.state.DBR, eff, value);
         break;
@@ -400,6 +439,52 @@ export class CPU65C816 {
         const eff = (this.state.D + dp) & 0xffff;
         const value = this.state.A & 0xff;
         this.write8(0x00, eff, value);
+        break;
+      }
+
+      // Indexed indirect and indirect indexed
+      case 0xa1: { // LDA (dp,X)
+        const dp = this.fetch8();
+        const ptr = (this.state.D + ((dp + (this.state.X & 0xff)) & 0xff)) & 0xffff;
+        const lo = this.read8(0x00, ptr);
+        const hi = this.read8(0x00, (ptr + 1) & 0xffff);
+        const eff = ((hi << 8) | lo) & 0xffff;
+        const value = this.read8(this.state.DBR, eff);
+        this.state.A = (this.state.A & 0xff00) | value;
+        this.setZNFromValue(value, 8);
+        break;
+      }
+      case 0xb1: { // LDA (dp),Y
+        const dp = this.fetch8();
+        const ptr = (this.state.D + dp) & 0xffff;
+        const lo = this.read8(0x00, ptr);
+        const hi = this.read8(0x00, (ptr + 1) & 0xffff);
+        const base = ((hi << 8) | lo) & 0xffff;
+        const eff = (base + (this.state.Y & 0xff)) & 0xffff;
+        const value = this.read8(this.state.DBR, eff);
+        this.state.A = (this.state.A & 0xff00) | value;
+        this.setZNFromValue(value, 8);
+        break;
+      }
+      case 0x81: { // STA (dp,X)
+        const dp = this.fetch8();
+        const ptr = (this.state.D + ((dp + (this.state.X & 0xff)) & 0xff)) & 0xffff;
+        const lo = this.read8(0x00, ptr);
+        const hi = this.read8(0x00, (ptr + 1) & 0xffff);
+        const eff = ((hi << 8) | lo) & 0xffff;
+        const value = this.state.A & 0xff;
+        this.write8(this.state.DBR, eff, value);
+        break;
+      }
+      case 0x91: { // STA (dp),Y
+        const dp = this.fetch8();
+        const ptr = (this.state.D + dp) & 0xffff;
+        const lo = this.read8(0x00, ptr);
+        const hi = this.read8(0x00, (ptr + 1) & 0xffff);
+        const base = ((hi << 8) | lo) & 0xffff;
+        const eff = (base + (this.state.Y & 0xff)) & 0xffff;
+        const value = this.state.A & 0xff;
+        this.write8(this.state.DBR, eff, value);
         break;
       }
 
