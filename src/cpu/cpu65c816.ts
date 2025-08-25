@@ -72,6 +72,24 @@ export class CPU65C816 {
     return (hi << 8) | lo;
   }
 
+  private write8(bank: Byte, addr: Word, value: Byte): void {
+    const a = ((bank << 16) | addr) >>> 0;
+    this.bus.write8(a, value & 0xff);
+  }
+
+  private push8(v: Byte): void {
+    // Emulation mode: stack page is 0x0100, S low byte decremented
+    const spAddr = (0x0100 | (this.state.S & 0xff)) & 0xffff;
+    this.write8(0x00, spAddr as Word, v);
+    this.state.S = ((this.state.S - 1) & 0xff) | 0x0100;
+  }
+
+  private pull8(): Byte {
+    this.state.S = ((this.state.S + 1) & 0xff) | 0x0100;
+    const spAddr = (0x0100 | (this.state.S & 0xff)) & 0xffff;
+    return this.read8(0x00, spAddr as Word);
+  }
+
   private fetch8(): Byte {
     const v = this.read8(this.state.PBR, this.state.PC);
     this.state.PC = (this.state.PC + 1) & 0xffff;
@@ -165,6 +183,51 @@ export class CPU65C816 {
         if ((this.state.P & Flag.Z) === 0) {
           this.state.PC = (this.state.PC + off) & 0xffff;
         }
+        break;
+      }
+
+      // Stack operations: PHA/PLA, PHP/PLP
+      case 0x48: { // PHA
+        const val = this.m8 ? (this.state.A & 0xff) : (this.state.A & 0xff);
+        this.push8(val);
+        break;
+      }
+      case 0x68: { // PLA
+        const v = this.pull8();
+        if (this.m8) {
+          this.state.A = (this.state.A & 0xff00) | v;
+          this.setZNFromValue(v, 8);
+        } else {
+          // In native 16-bit A mode, PLA pulls 16 bits; but in E-mode it's 8-bit
+          this.state.A = (this.state.A & 0xff00) | v;
+          this.setZNFromValue(v, 8);
+        }
+        break;
+      }
+      case 0x08: { // PHP
+        this.push8(this.state.P);
+        break;
+      }
+      case 0x28: { // PLP
+        this.state.P = this.pull8();
+        break;
+      }
+
+      // JSR abs / RTS
+      case 0x20: { // JSR absolute to current bank
+        const target = this.fetch16();
+        // Push (PC-1) high then low
+        const ret = (this.state.PC - 1) & 0xffff;
+        this.push8((ret >>> 8) & 0xff);
+        this.push8(ret & 0xff);
+        this.state.PC = target;
+        break;
+      }
+      case 0x60: { // RTS
+        const lo = this.pull8();
+        const hi = this.pull8();
+        const addr = ((hi << 8) | lo) & 0xffff;
+        this.state.PC = (addr + 1) & 0xffff;
         break;
       }
 
