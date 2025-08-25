@@ -1,6 +1,7 @@
 import { IMemoryBus, Byte, Word } from '../emulator/types';
 import { Cartridge } from '../cart/cartridge';
 import { PPU } from '../ppu/ppu';
+import { Controller } from '../input/controller';
 
 // Partial SNES Bus focusing on ROM, WRAM, MMIO, and basic DMA for tests.
 export class SNESBus implements IMemoryBus {
@@ -21,6 +22,10 @@ export class SNESBus implements IMemoryBus {
   private a1tl = new Uint16Array(8);  // $43x2-$43x3 (little endian)
   private a1b = new Uint8Array(8);    // $43x4
   private das = new Uint16Array(8);   // $43x5-$43x6
+
+  // Controllers
+  private controller1 = new Controller();
+  private ctrlStrobe = 0;
 
   constructor(private cart: Cartridge) {}
 
@@ -44,6 +49,12 @@ export class SNESBus implements IMemoryBus {
     }
 
     // APU/io ranges not implemented for read
+
+    // Controller ports $4016/$4017 (we only model $4016 bit0)
+    if (off === 0x4016) {
+      const bit = this.controller1.readBit();
+      return bit;
+    }
 
     // ROM mapping (simplified LoROM/HiROM)
     if (this.cart.mapping === 'lorom') {
@@ -119,6 +130,13 @@ export class SNESBus implements IMemoryBus {
     // PPU MMIO $2100-$21FF
     if ((off & 0xff00) === 0x2100) {
       this.ppu.writeReg(off & 0x00ff, value & 0xff);
+      return;
+    }
+
+    // Controller strobe $4016 write
+    if (off === 0x4016) {
+      this.ctrlStrobe = value & 1;
+      this.controller1.writeStrobe(value);
       return;
     }
 
