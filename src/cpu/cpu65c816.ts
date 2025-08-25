@@ -128,6 +128,15 @@ export class CPU65C816 {
     this.setZNFromValue(res, this.m8 ? 8 : 16);
   }
 
+  private updateWidthConstraintsForE(): void {
+    if (this.state.E) {
+      // In emulation, M and X forced to 1 (8-bit)
+      this.state.P |= (Flag.M | Flag.X);
+      // High byte of S forced to 0x01
+      this.state.S = (this.state.S & 0xff) | 0x0100;
+    }
+  }
+
   stepInstruction(): void {
     const opcode = this.fetch8();
     switch (opcode) {
@@ -145,6 +154,34 @@ export class CPU65C816 {
         } else {
           const imm = this.fetch16();
           this.state.A = imm;
+          this.setZNFromValue(imm, 16);
+        }
+        break;
+      }
+
+      // LDX #imm
+      case 0xa2: {
+        if (this.x8) {
+          const imm = this.fetch8();
+          this.state.X = (this.state.X & 0xff00) | imm;
+          this.setZNFromValue(imm, 8);
+        } else {
+          const imm = this.fetch16();
+          this.state.X = imm;
+          this.setZNFromValue(imm, 16);
+        }
+        break;
+      }
+
+      // LDY #imm
+      case 0xa0: {
+        if (this.x8) {
+          const imm = this.fetch8();
+          this.state.Y = (this.state.Y & 0xff00) | imm;
+          this.setZNFromValue(imm, 8);
+        } else {
+          const imm = this.fetch16();
+          this.state.Y = imm;
           this.setZNFromValue(imm, 16);
         }
         break;
@@ -170,6 +207,31 @@ export class CPU65C816 {
         this.state.P |= Flag.C;
         break;
 
+      // REP / SEP (clear/set bits in P)
+      case 0xc2: { // REP #imm8
+        const m = this.fetch8();
+        this.state.P &= ~m;
+        this.updateWidthConstraintsForE();
+        break;
+      }
+      case 0xe2: { // SEP #imm8
+        const m = this.fetch8();
+        this.state.P |= m;
+        this.updateWidthConstraintsForE();
+        break;
+      }
+
+      // XCE (exchange carry and emulation)
+      case 0xfb: {
+        const oldC = (this.state.P & Flag.C) !== 0 ? 1 : 0;
+        const oldE = this.state.E ? 1 : 0;
+        // Swap
+        if (oldE) this.state.P |= Flag.C; else this.state.P &= ~Flag.C;
+        this.state.E = oldC !== 0;
+        this.updateWidthConstraintsForE();
+        break;
+      }
+
       // BEQ rel8 / BNE rel8
       case 0xf0: { // BEQ
         const off = this.fetch8() << 24 >> 24; // sign-extend
@@ -183,6 +245,23 @@ export class CPU65C816 {
         if ((this.state.P & Flag.Z) === 0) {
           this.state.PC = (this.state.PC + off) & 0xffff;
         }
+        break;
+      }
+
+      // LDA abs (DBR:addr)
+      case 0xad: {
+        const addr = this.fetch16();
+        const value = this.read8(this.state.DBR, addr);
+        this.state.A = (this.state.A & 0xff00) | value;
+        this.setZNFromValue(value, 8);
+        break;
+      }
+
+      // STA abs (DBR:addr)
+      case 0x8d: {
+        const addr = this.fetch16();
+        const value = this.state.A & 0xff; // E-mode (8-bit)
+        this.write8(this.state.DBR, addr, value);
         break;
       }
 
