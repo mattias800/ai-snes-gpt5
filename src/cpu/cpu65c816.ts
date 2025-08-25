@@ -237,6 +237,16 @@ export class CPU65C816 {
         break;
       }
 
+      // BRK (simplified emulation-mode behavior): jump to $FFFE/$FFFF
+      case 0x00: {
+        // Set I flag
+        this.state.P |= Flag.I;
+        const lo = this.read8(0x00, 0xfffe);
+        const hi = this.read8(0x00, 0xffff);
+        this.state.PC = ((hi << 8) | lo) & 0xffff;
+        break;
+      }
+
       // Shifts/rotates accumulator (E-mode, 8-bit)
       case 0x0a: // ASL A
         this.aslA();

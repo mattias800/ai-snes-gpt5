@@ -31,10 +31,10 @@ describe('CPU65C816 reset and NOP', () => {
     expect(cpu.state.PC).toBe(0x8001);
   });
 
-  it('throws on unimplemented opcode', () => {
+  it('throws on unimplemented opcode (WDM $42)', () => {
     const bus = new TestMemoryBus();
     writeResetVector(bus, 0x1234);
-    bus.write8(0x00000000 | 0x1234, 0x00); // BRK in 6502, not implemented yet
+    bus.write8((0x00 << 16) | 0x1234, 0x42); // WDM (not implemented)
 
     const cpu = new CPU65C816(bus);
     cpu.reset();
