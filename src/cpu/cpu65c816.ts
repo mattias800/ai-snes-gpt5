@@ -48,8 +48,8 @@ export class CPU65C816 {
     // Stack pointer high byte fixed to 0x01 in emulation; low byte undefined -> typically 0xFF
     this.state.S = 0x01ff;
     // Fetch reset vector from bank 0x00 at 0xFFFC/0xFFFD
-    const lo = this.bus.read8(0x00fffffc & 0xffffff);
-    const hi = this.bus.read8(0x00fffffd & 0xffffff);
+    const lo = this.read8(0x00, 0xfffc);
+    const hi = this.read8(0x00, 0xfffd);
     this.state.PC = (hi << 8) | lo;
     this.state.PBR = 0x00;
   }

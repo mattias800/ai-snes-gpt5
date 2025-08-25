@@ -3,17 +3,17 @@ import { CPU65C816, Flag } from '../../src/cpu/cpu65c816';
 import { TestMemoryBus } from '../../src/bus/testMemoryBus';
 
 function writeResetVector(bus: TestMemoryBus, addr: number) {
-  // Write little-endian PC to 0x00:FFFC/FFFD in our flat memory space
-  bus.write8(0x00fffffc, addr & 0xff);
-  bus.write8(0x00fffffd, (addr >>> 8) & 0xff);
+  // Write little-endian PC to bank 0x00 @ 0xFFFC/0xFFFD in 24-bit space
+  bus.write8((0x00 << 16) | 0xfffc, addr & 0xff);
+  bus.write8((0x00 << 16) | 0xfffd, (addr >>> 8) & 0xff);
 }
 
 describe('CPU65C816 reset and NOP', () => {
   it('resets to emulation mode, sets SP high byte to 0x01, sets M and X flags, and jumps to vector', () => {
     const bus = new TestMemoryBus();
     writeResetVector(bus, 0x8000);
-    // Place a NOP at reset vector
-    bus.write8(0x00800000 | 0x8000, 0xea);
+    // Place a NOP at reset vector (bank 0x00, address 0x8000)
+    bus.write8((0x00 << 16) | 0x8000, 0xea);
 
     const cpu = new CPU65C816(bus);
     cpu.reset();

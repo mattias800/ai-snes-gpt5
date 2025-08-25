@@ -10,8 +10,8 @@ describe('CPU determinism for NOP stream', () => {
     const bus = new TestMemoryBus();
     const start = 0x4000;
     // Write reset vector and fill 256 bytes with NOP (0xEA)
-    bus.write8(0x00fffffc, start & 0xff);
-    bus.write8(0x00fffffd, (start >>> 8) & 0xff);
+    bus.write8((0x00 << 16) | 0xfffc, start & 0xff);
+    bus.write8((0x00 << 16) | 0xfffd, (start >>> 8) & 0xff);
     for (let i = 0; i < 256; i++) {
       bus.write8((0x00 << 16) | ((start + i) & 0xffff), 0xea);
     }
