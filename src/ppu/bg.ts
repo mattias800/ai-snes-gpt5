@@ -394,13 +394,18 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
     //  - W34SEL: BG3 A=bit0, B=bit1; BG4 A=bit2, B=bit3
     //  - WOBJSEL: OBJ A=bit0, B=bit1
     let useA = false, useB = false;
-    if (mainLayer === 1) { useA = (ppu.w12sel & 0x01) !== 0; useB = (ppu.w12sel & 0x02) !== 0; }
-    else if (mainLayer === 2) { useA = (ppu.w12sel & 0x04) !== 0; useB = (ppu.w12sel & 0x08) !== 0; }
-    else if (mainLayer === 3) { useA = (ppu.w34sel & 0x01) !== 0; useB = (ppu.w34sel & 0x02) !== 0; }
-    else if (mainLayer === 4) { useA = (ppu.wobjsel & 0x01) !== 0; useB = (ppu.wobjsel & 0x02) !== 0; }
+    let invA = false, invB = false;
+    if (mainLayer === 1) { useA = (ppu.w12sel & 0x01) !== 0; useB = (ppu.w12sel & 0x02) !== 0; invA = (ppu.w12sel & 0x10) !== 0; invB = (ppu.w12sel & 0x20) !== 0; }
+    else if (mainLayer === 2) { useA = (ppu.w12sel & 0x04) !== 0; useB = (ppu.w12sel & 0x08) !== 0; invA = (ppu.w12sel & 0x40) !== 0; invB = (ppu.w12sel & 0x80) !== 0; }
+    else if (mainLayer === 3) { useA = (ppu.w34sel & 0x01) !== 0; useB = (ppu.w34sel & 0x02) !== 0; invA = (ppu.w34sel & 0x10) !== 0; invB = (ppu.w34sel & 0x20) !== 0; }
+    else if (mainLayer === 4) { useA = (ppu.wobjsel & 0x01) !== 0; useB = (ppu.wobjsel & 0x02) !== 0; invA = (ppu.wobjsel & 0x10) !== 0; invB = (ppu.wobjsel & 0x20) !== 0; }
 
     if (useA || useB) {
-      const inWindow = combineWin(useA && inA(x), useB && inB(x));
+      const aHit = useA ? inA(x) : false;
+      const bHit = useB ? inB(x) : false;
+      const aEff = invA ? !aHit : aHit;
+      const bEff = invB ? !bHit : bHit;
+      const inWindow = combineWin(aEff, bEff);
       if (applyInside !== inWindow) mainAffected = false;
     }
 
@@ -408,12 +413,17 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
     const subGate = (ppu.cgwsel & 0x02) !== 0;
     if (subGate && subLayer !== 0) {
       let sUseA = false, sUseB = false;
-      if (subLayer === 1) { sUseA = (ppu.w12sel & 0x01) !== 0; sUseB = (ppu.w12sel & 0x02) !== 0; }
-      else if (subLayer === 2) { sUseA = (ppu.w12sel & 0x04) !== 0; sUseB = (ppu.w12sel & 0x08) !== 0; }
-      else if (subLayer === 3) { sUseA = (ppu.w34sel & 0x01) !== 0; sUseB = (ppu.w34sel & 0x02) !== 0; }
-      else if (subLayer === 4) { sUseA = (ppu.wobjsel & 0x01) !== 0; sUseB = (ppu.wobjsel & 0x02) !== 0; }
+      let sInvA = false, sInvB = false;
+      if (subLayer === 1) { sUseA = (ppu.w12sel & 0x01) !== 0; sUseB = (ppu.w12sel & 0x02) !== 0; sInvA = (ppu.w12sel & 0x10) !== 0; sInvB = (ppu.w12sel & 0x20) !== 0; }
+      else if (subLayer === 2) { sUseA = (ppu.w12sel & 0x04) !== 0; sUseB = (ppu.w12sel & 0x08) !== 0; sInvA = (ppu.w12sel & 0x40) !== 0; sInvB = (ppu.w12sel & 0x80) !== 0; }
+      else if (subLayer === 3) { sUseA = (ppu.w34sel & 0x01) !== 0; sUseB = (ppu.w34sel & 0x02) !== 0; sInvA = (ppu.w34sel & 0x10) !== 0; sInvB = (ppu.w34sel & 0x20) !== 0; }
+      else if (subLayer === 4) { sUseA = (ppu.wobjsel & 0x01) !== 0; sUseB = (ppu.wobjsel & 0x02) !== 0; sInvA = (ppu.wobjsel & 0x10) !== 0; sInvB = (ppu.wobjsel & 0x20) !== 0; }
       if (sUseA || sUseB) {
-        const sIn = combineWin(sUseA && inA(x), sUseB && inB(x));
+        const aHit = sUseA ? inA(x) : false;
+        const bHit = sUseB ? inB(x) : false;
+        const aEff = sInvA ? !aHit : aHit;
+        const bEff = sInvB ? !bHit : bHit;
+        const sIn = combineWin(aEff, bEff);
         if (applyInside !== sIn) {
           subColor = backColor;
         }
