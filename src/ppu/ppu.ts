@@ -24,6 +24,16 @@ export class PPU {
   // OAM addressing
   private oamAddr = 0x000; // 0..543
 
+  // BG1 registers (subset)
+  public bg1MapBaseWord = 0;   // computed from $2107
+  public bg1CharBaseWord = 0;  // computed from $210B
+  public bg1HOfs = 0;          // pixels
+  public bg1VOfs = 0;          // pixels
+  private bg1HOfsLatchLow = 0;
+  private bg1HOfsPhase = 0; // 0=expect low, 1=expect high
+  private bg1VOfsLatchLow = 0;
+  private bg1VOfsPhase = 0;
+
   // Helpers
   private vramStepWords(): number {
     const stepSel = this.vmain & 0x03;
@@ -122,6 +132,36 @@ export class PPU {
       }
       case 0x15: { // VMAIN ($2115)
         this.vmain = v;
+        break;
+      }
+      case 0x07: { // BG1SC ($2107)
+        // Bits 2-7: tilemap base address in VRAM, units of 0x400 bytes => words offset = ((v & 0xFC)>>2) * 0x200
+        this.bg1MapBaseWord = (v & 0xfc) << 7; // ((v & 0xFC) >> 2) << 9 == (v & 0xFC) << 7
+        break;
+      }
+      case 0x0b: { // BG12NBA ($210B)
+        // Bits 4-7: BG1 char base in units of 0x1000 bytes => words offset = nibble * 0x800
+        this.bg1CharBaseWord = ((v >> 4) & 0x0f) << 11;
+        break;
+      }
+      case 0x0d: { // BG1HOFS ($210D)
+        if (this.bg1HOfsPhase === 0) {
+          this.bg1HOfsLatchLow = v;
+          this.bg1HOfsPhase = 1;
+        } else {
+          this.bg1HOfs = ((v & 0x07) << 8) | this.bg1HOfsLatchLow;
+          this.bg1HOfsPhase = 0;
+        }
+        break;
+      }
+      case 0x0e: { // BG1VOFS ($210E)
+        if (this.bg1VOfsPhase === 0) {
+          this.bg1VOfsLatchLow = v;
+          this.bg1VOfsPhase = 1;
+        } else {
+          this.bg1VOfs = ((v & 0x07) << 8) | this.bg1VOfsLatchLow;
+          this.bg1VOfsPhase = 0;
+        }
         break;
       }
       case 0x16: { // VMADDL ($2116)
