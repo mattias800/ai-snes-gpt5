@@ -378,6 +378,7 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
 
   // Choose subscreen pixel by priority among enabled TS layers
   let subColor: number = backColor;
+  const useFixedWhenNoSub = (ppu.cgwsel & 0x04) !== 0; // simplified: CGWSEL bit2 selects fixed color as subscreen when absent/masked
   let bestSubPri = -1;
   let subLayer = 0; // 0=backdrop, 1=BG1, 2=BG2, 3=BG3, 4=OBJ
   function considerSub(lid: number, layerEnabled: boolean, zero: boolean, pri: number, pal: number) {
@@ -388,6 +389,9 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
   considerSub(2, subBG2, z2, prio2, pal2);
   considerSub(3, subBG3, z3, prio3, pal3);
   considerSub(4, subOBJ, obj.zero, obj.pri, obj.pal);
+  if (useFixedWhenNoSub && bestSubPri < 0) {
+    subColor = ((ppu.fixedR & 0x1f) << 10) | ((ppu.fixedG & 0x1f) << 5) | (ppu.fixedB & 0x1f);
+  }
 
     let outColor = mainColor;
     // Apply color math only if globally enabled and the main layer is selected in mask (or mask==0 applies to all)
@@ -430,7 +434,7 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
         const bEff = sInvB ? !bHit : bHit;
         const sIn = combineWin(aEff, bEff);
         if (applyInside !== sIn) {
-          subColor = backColor;
+          subColor = useFixedWhenNoSub ? (((ppu.fixedR & 0x1f) << 10) | ((ppu.fixedG & 0x1f) << 5) | (ppu.fixedB & 0x1f)) : backColor;
         }
       }
     }

@@ -23,6 +23,10 @@ export class PPU {
   // Color math registers (minimal)
   public cgwsel = 0x00; // $2130 (window + math control; simplified)
   public cgadsub = 0x00; // $2131 (add/sub, half, mask)
+  // Fixed color (COLDATA $2132 simplified)
+  public fixedR = 0; // 0..31
+  public fixedG = 0; // 0..31
+  public fixedB = 0; // 0..31
 
   // VRAM addressing
   private vmain = 0x00; // $2115
@@ -389,6 +393,13 @@ export class PPU {
       }
       case 0x31: { // CGADSUB ($2131)
         this.cgadsub = v & 0xff;
+        break;
+      }
+      case 0x32: { // COLDATA ($2132) simplified: high bits select channel(s), low5 value
+        const val5 = v & 0x1f;
+        if (v & 0x20) this.fixedR = val5;
+        if (v & 0x40) this.fixedG = val5;
+        if (v & 0x80) this.fixedB = val5;
         break;
       }
 
