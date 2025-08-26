@@ -13,7 +13,7 @@ This project intentionally implements a simplified subset of the SNES PPU window
   - bit5: global enable of color math in our model
   - bit7: 1=subtract, 0=add
   - bit6: half (applies after add/sub)
-  - bits0..4: per-layer mask: BG1(0), BG2(1), BG3(2), BG4(3 not yet used), OBJ(4). mask=0 means apply to all (including backdrop)
+  - bits0..4: per-layer mask: BG1(0), BG2(1), BG3(2), BG4(3), OBJ(4). mask=0 means apply to all (including backdrop)
 - CGWSEL ($2130)
   - bit0: applyInside: 1=apply color math inside the window, 0=outside
   - bit1: also gate the subscreen by the window

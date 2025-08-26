@@ -213,6 +213,28 @@ function computeBG3PriorityMask(ppu: PPU, widthPixels: number, heightPixels: num
   return out;
 }
 
+// Compute per-pixel priority masks for BG4 (8x8 tiles, 32x32 map)
+function computeBG4PriorityMask(ppu: PPU, widthPixels: number, heightPixels: number): number[] {
+  const out = new Array(widthPixels * heightPixels).fill(0);
+  const mapBase = ppu.bg4MapBaseWord;
+  const tileSize = 8;
+  const mapWidth = 32;
+  const mapHeight = 32;
+  for (let y = 0; y < heightPixels; y++) {
+    for (let x = 0; x < widthPixels; x++) {
+      const worldX = (x + ppu.bg4HOfs) >>> 0;
+      const worldY = (y + ppu.bg4VOfs) >>> 0;
+      let tileX = Math.floor(worldX / tileSize) % mapWidth;
+      let tileY = Math.floor(worldY / tileSize) % mapHeight;
+      if (tileX < 0) tileX += mapWidth;
+      if (tileY < 0) tileY += mapHeight;
+      const entry = ppu.inspectVRAMWord(mapBase + tileY * 32 + tileX);
+      out[y * widthPixels + x] = (entry & 0x2000) ? 1 : 0;
+    }
+  }
+  return out;
+}
+
 // Render a BG3 region (2bpp) indices
 export function renderBG3RegionIndices(ppu: PPU, widthPixels: number, heightPixels: number): number[] {
   const out = new Array(widthPixels * heightPixels).fill(0);
@@ -253,22 +275,65 @@ export function renderBG3RegionIndices(ppu: PPU, widthPixels: number, heightPixe
   return out;
 }
 
+export function renderBG4RegionIndices(ppu: PPU, widthPixels: number, heightPixels: number): number[] {
+  const out = new Array(widthPixels * heightPixels).fill(0);
+  const mapBase = ppu.bg4MapBaseWord;
+  const charBase = ppu.bg4CharBaseWord;
+
+  const tileSize = 8;
+  const mapWidth = 32;
+  const mapHeight = 32;
+
+  for (let y = 0; y < heightPixels; y++) {
+    for (let x = 0; x < widthPixels; x++) {
+      const worldX = (x + ppu.bg4HOfs) >>> 0;
+      const worldY = (y + ppu.bg4VOfs) >>> 0;
+
+      let tileX = Math.floor(worldX / tileSize) % mapWidth;
+      let tileY = Math.floor(worldY / tileSize) % mapHeight;
+      if (tileX < 0) tileX += mapWidth;
+      if (tileY < 0) tileY += mapHeight;
+
+      let inTileX = worldX % tileSize; if (inTileX < 0) inTileX += tileSize;
+      let inTileY = worldY % tileSize; if (inTileY < 0) inTileY += tileSize;
+
+      const entry = ppu.inspectVRAMWord(mapBase + tileY * 32 + tileX);
+      const tileIndexBase = entry & 0x03ff;
+      const paletteGroup = (entry >>> 10) & 0x07;
+      const xFlip = (entry & 0x4000) !== 0;
+      const yFlip = (entry & 0x8000) !== 0;
+
+      const sx = xFlip ? (7 - (inTileX & 7)) : (inTileX & 7);
+      const sy = yFlip ? (7 - (inTileY & 7)) : (inTileY & 7);
+      const tile = render2bppTileIndices(ppu, charBase, tileIndexBase);
+      const pix = tile[sy * 8 + sx];
+      out[y * widthPixels + x] = paletteGroup * 16 + pix;
+    }
+  }
+
+  return out;
+}
+
 export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels: number): Uint8ClampedArray {
   const bg1 = renderBG1RegionIndices(ppu, widthPixels, heightPixels);
   const bg2 = renderBG2RegionIndices(ppu, widthPixels, heightPixels);
   const bg3 = renderBG3RegionIndices(ppu, widthPixels, heightPixels);
+  const bg4 = renderBG4RegionIndices(ppu, widthPixels, heightPixels);
   const pr1 = computeBG1PriorityMask(ppu, widthPixels, heightPixels);
   const pr2 = computeBG2PriorityMask(ppu, widthPixels, heightPixels);
   const pr3 = computeBG3PriorityMask(ppu, widthPixels, heightPixels);
+  const pr4 = computeBG4PriorityMask(ppu, widthPixels, heightPixels);
   const out = new Uint8ClampedArray(widthPixels * heightPixels * 4);
   const scale = ppu.forceBlank ? 0 : Math.max(0, Math.min(15, ppu.brightness)) / 15;
   const enableBG1 = (ppu.tm & 0x01) !== 0;
   const enableBG2 = (ppu.tm & 0x02) !== 0;
   const enableBG3 = (ppu.tm & 0x04) !== 0;
+  const enableBG4 = (ppu.tm & 0x08) !== 0;
   const enableOBJ = (ppu.tm & 0x10) !== 0;
   const subBG1 = (ppu.ts & 0x01) !== 0;
   const subBG2 = (ppu.ts & 0x02) !== 0;
   const subBG3 = (ppu.ts & 0x04) !== 0;
+  const subBG4 = (ppu.ts & 0x08) !== 0;
   const subOBJ = (ppu.ts & 0x10) !== 0;
   const backColor = ppu.inspectCGRAMWord(0);
 
@@ -374,7 +439,8 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
     considerMain(1, enableBG1, z1, prio1, pal1);
     considerMain(2, enableBG2, z2, prio2, pal2);
     considerMain(3, enableBG3, z3, prio3, pal3);
-    considerMain(4, enableOBJ, obj.zero, obj.pri, obj.pal);
+    considerMain(4, enableBG4, (bg4[i] & 0x0f) === 0, pr4[i] | 0, bg4[i] & 0xff);
+    considerMain(5, enableOBJ, obj.zero, obj.pri, obj.pal);
 
   // Choose subscreen pixel by priority among enabled TS layers
   let subColor: number = backColor;
@@ -388,14 +454,15 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
   considerSub(1, subBG1, z1, prio1, pal1);
   considerSub(2, subBG2, z2, prio2, pal2);
   considerSub(3, subBG3, z3, prio3, pal3);
-  considerSub(4, subOBJ, obj.zero, obj.pri, obj.pal);
+  considerSub(4, subBG4, (bg4[i] & 0x0f) === 0, pr4[i] | 0, bg4[i] & 0xff);
+  considerSub(5, subOBJ, obj.zero, obj.pri, obj.pal);
   if (useFixedWhenNoSub && bestSubPri < 0) {
     subColor = ((ppu.fixedR & 0x1f) << 10) | ((ppu.fixedG & 0x1f) << 5) | (ppu.fixedB & 0x1f);
   }
 
     let outColor = mainColor;
     // Apply color math only if globally enabled and the main layer is selected in mask (or mask==0 applies to all)
-    let mainAffected = (mask === 0) || (mainLayer === 1 && (mask & 0x01)) || (mainLayer === 2 && (mask & 0x02)) || (mainLayer === 3 && (mask & 0x04)) || (mainLayer === 4 && (mask & 0x10));
+    let mainAffected = (mask === 0) || (mainLayer === 1 && (mask & 0x01)) || (mainLayer === 2 && (mask & 0x02)) || (mainLayer === 3 && (mask & 0x04)) || (mainLayer === 4 && (mask & 0x08)) || (mainLayer === 5 && (mask & 0x10));
 
     // Window gate: per-layer A/B enables via W12SEL/W34SEL/WOBJSEL.
     // Mapping (simplified):
@@ -410,7 +477,8 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
     else if (mainLayer === 1) { useA = (ppu.w12sel & 0x01) !== 0; useB = (ppu.w12sel & 0x02) !== 0; invA = (ppu.w12sel & 0x10) !== 0; invB = (ppu.w12sel & 0x20) !== 0; }
     else if (mainLayer === 2) { useA = (ppu.w12sel & 0x04) !== 0; useB = (ppu.w12sel & 0x08) !== 0; invA = (ppu.w12sel & 0x40) !== 0; invB = (ppu.w12sel & 0x80) !== 0; }
     else if (mainLayer === 3) { useA = (ppu.w34sel & 0x01) !== 0; useB = (ppu.w34sel & 0x02) !== 0; invA = (ppu.w34sel & 0x10) !== 0; invB = (ppu.w34sel & 0x20) !== 0; }
-    else if (mainLayer === 4) { useA = (ppu.wobjsel & 0x01) !== 0; useB = (ppu.wobjsel & 0x02) !== 0; invA = (ppu.wobjsel & 0x10) !== 0; invB = (ppu.wobjsel & 0x20) !== 0; }
+    else if (mainLayer === 4) { useA = (ppu.w34sel & 0x04) !== 0; useB = (ppu.w34sel & 0x08) !== 0; invA = (ppu.w34sel & 0x40) !== 0; invB = (ppu.w34sel & 0x80) !== 0; }
+    else if (mainLayer === 5) { useA = (ppu.wobjsel & 0x01) !== 0; useB = (ppu.wobjsel & 0x02) !== 0; invA = (ppu.wobjsel & 0x10) !== 0; invB = (ppu.wobjsel & 0x20) !== 0; }
 
     const clipToBlack = (ppu.cgwsel & 0x08) !== 0; // simplified: bit3 => clip-to-black on non-math side of window
     let clipThisPixel = false;
@@ -437,7 +505,8 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
       else if (subLayer === 1) { sUseA = (ppu.w12sel & 0x01) !== 0; sUseB = (ppu.w12sel & 0x02) !== 0; sInvA = (ppu.w12sel & 0x10) !== 0; sInvB = (ppu.w12sel & 0x20) !== 0; }
       else if (subLayer === 2) { sUseA = (ppu.w12sel & 0x04) !== 0; sUseB = (ppu.w12sel & 0x08) !== 0; sInvA = (ppu.w12sel & 0x40) !== 0; sInvB = (ppu.w12sel & 0x80) !== 0; }
       else if (subLayer === 3) { sUseA = (ppu.w34sel & 0x01) !== 0; sUseB = (ppu.w34sel & 0x02) !== 0; sInvA = (ppu.w34sel & 0x10) !== 0; sInvB = (ppu.w34sel & 0x20) !== 0; }
-      else if (subLayer === 4) { sUseA = (ppu.wobjsel & 0x01) !== 0; sUseB = (ppu.wobjsel & 0x02) !== 0; sInvA = (ppu.wobjsel & 0x10) !== 0; sInvB = (ppu.wobjsel & 0x20) !== 0; }
+      else if (subLayer === 4) { sUseA = (ppu.w34sel & 0x04) !== 0; sUseB = (ppu.w34sel & 0x08) !== 0; sInvA = (ppu.w34sel & 0x40) !== 0; sInvB = (ppu.w34sel & 0x80) !== 0; }
+      else if (subLayer === 5) { sUseA = (ppu.wobjsel & 0x01) !== 0; sUseB = (ppu.wobjsel & 0x02) !== 0; sInvA = (ppu.wobjsel & 0x10) !== 0; sInvB = (ppu.wobjsel & 0x20) !== 0; }
       if (sUseA || sUseB) {
         const aHit = sUseA ? inA(x) : false;
         const bHit = sUseB ? inB(x) : false;
