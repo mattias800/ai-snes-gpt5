@@ -1,14 +1,14 @@
 import fs from 'fs';
 import { PNG } from 'pngjs';
-import { normaliseRom } from '../src/cart/loader.ts';
-import { parseHeader } from '../src/cart/header.ts';
-import { Cartridge } from '../src/cart/cartridge.ts';
-import { Emulator } from '../src/emulator/core.ts';
-import { Scheduler } from '../src/emulator/scheduler.ts';
-import { renderMainScreenRGBA } from '../src/ppu/bg.ts';
+import { normaliseRom } from '../dist/cart/loader.js';
+import { parseHeader } from '../dist/cart/header.js';
+import { Cartridge } from '../dist/cart/cartridge.js';
+import { Emulator } from '../dist/emulator/core.js';
+import { Scheduler } from '../dist/emulator/scheduler.js';
+import { renderMainScreenRGBA } from '../dist/ppu/bg.js';
 
-function parseArgs(argv: string[]): Record<string, string> {
-  const out: Record<string, string> = {};
+function parseArgs(argv) {
+  const out = {};
   for (const a of argv.slice(2)) {
     const m = a.match(/^--([^=]+)=(.*)$/);
     if (m) out[m[1]] = m[2];
@@ -25,7 +25,7 @@ async function main() {
   const width = Number.isFinite(Number(args.width)) ? Number(args.width) : 256;
   const height = Number.isFinite(Number(args.height)) ? Number(args.height) : 224;
   const holdStart = (args.holdStart ?? '1') !== '0';
-  const cpuErrMode = (args.onCpuError as 'ignore'|'throw'|'record') || (process.env.SMW_CPUERR as any) || 'record';
+  const cpuErrMode = (args.onCpuError) || (process.env.SMW_CPUERR) || 'record';
 
   if (!romPath) {
     console.error('Usage: npm run screenshot -- --rom=path/to/SMW.sfc --out=./out.png [--frames=180] [--ips=200] [--width=256] [--height=224] [--holdStart=1] [--onCpuError=record|throw|ignore]');
@@ -53,18 +53,16 @@ async function main() {
   } catch (e) {
     console.error('[screenshot] CPU error during stepping:', e);
     if (cpuErrMode === 'throw') throw e;
-    // else continue to attempt rendering with current state
   }
 
   const ppu = emu.bus.getPPU();
   const rgba = renderMainScreenRGBA(ppu, width, height);
 
   const png = new PNG({ width, height });
-  // pngjs expects a Buffer; ensure we pass a Node Buffer view
   const buf = Buffer.from(rgba.buffer, rgba.byteOffset, rgba.byteLength);
   buf.copy(png.data);
 
-  await new Promise<void>((resolve, reject) => {
+  await new Promise((resolve, reject) => {
     const s = fs.createWriteStream(outPath);
     png.pack().pipe(s);
     s.on('finish', () => resolve());
