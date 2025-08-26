@@ -29,6 +29,8 @@ describe('HDMA-like mid-scanline changes (simulated by segment rendering)', () =
   it('enables color math halfway through the scanline', () => {
     const bus = mkBus();
     const ppu = bus.getPPU();
+    // Use simplified (legacy) mask semantics for this test: bit5 acts as global enable
+    ;(ppu as any).cgwStrictMaskMode = false;
 
     // Brightness and layer enables: BG1 main, BG2 subscreen
     w8(bus, mmio(0x00), 0x0f);
@@ -75,6 +77,8 @@ describe('HDMA-like mid-scanline changes (simulated by segment rendering)', () =
   it('disables BG1 mid-scanline to reveal BG2 on main', () => {
     const bus = mkBus();
     const ppu = bus.getPPU();
+    // Use simplified (legacy) mask semantics for this test: bit5 acts as global enable
+    ;(ppu as any).cgwStrictMaskMode = false;
 
     // Brightness, enable BG1+BG2 main, BG2 subscreen
     w8(bus, mmio(0x00), 0x0f);

@@ -99,7 +99,7 @@ export class PPU {
   public wh3 = 255;            // $2129: window 2 right
 
   // Feature flags for testing alternate semantics
-  public cgwStrictMaskMode = false; // when true, do not require CGADSUB bit5 as a global enable
+  public cgwStrictMaskMode = true; // when true, do not require CGADSUB bit5 as a global enable
 
   public bg1MapWidth64 = false;  // $2107 bits 0-1
   public bg1MapHeight64 = false;
