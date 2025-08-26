@@ -409,13 +409,20 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
     else if (mainLayer === 3) { useA = (ppu.w34sel & 0x01) !== 0; useB = (ppu.w34sel & 0x02) !== 0; invA = (ppu.w34sel & 0x10) !== 0; invB = (ppu.w34sel & 0x20) !== 0; }
     else if (mainLayer === 4) { useA = (ppu.wobjsel & 0x01) !== 0; useB = (ppu.wobjsel & 0x02) !== 0; invA = (ppu.wobjsel & 0x10) !== 0; invB = (ppu.wobjsel & 0x20) !== 0; }
 
+    const clipToBlack = (ppu.cgwsel & 0x08) !== 0; // simplified: bit3 => clip-to-black on non-math side of window
+    let clipThisPixel = false;
     if (useA || useB) {
       const aHit = useA ? inA(x) : false;
       const bHit = useB ? inB(x) : false;
       const aEff = invA ? !aHit : aHit;
       const bEff = invB ? !bHit : bHit;
-      const inWindow = combineWin(aEff, bEff);
-      if (applyInside !== inWindow) mainAffected = false;
+      const inWindow = (useA && useB) ? combineWin(aEff, bEff) : (useA ? aEff : bEff);
+      // Window decides two things in our simplified model:
+      //  - whether color math can apply (applyInside controls which side)
+      //  - optionally, whether to clip the main color to black on the non-math side
+      const mathSide = applyInside ? inWindow : !inWindow;
+      if (!mathSide) mainAffected = false;
+      if (clipToBlack && !mathSide) clipThisPixel = true;
     }
 
     // Optional subscreen window gating (CGWSEL bit1): mask subColor by windows using same mapping
@@ -432,14 +439,19 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
         const bHit = sUseB ? inB(x) : false;
         const aEff = sInvA ? !aHit : aHit;
         const bEff = sInvB ? !bHit : bHit;
-        const sIn = combineWin(aEff, bEff);
-        if (applyInside !== sIn) {
+        const sIn = (sUseA && sUseB) ? combineWin(aEff, bEff) : (sUseA ? aEff : bEff);
+        // Subside masking uses the same applyInside sense
+        const sMathSide = applyInside ? sIn : !sIn;
+        if (!sMathSide) {
           subColor = useFixedWhenNoSub ? (((ppu.fixedR & 0x1f) << 10) | ((ppu.fixedG & 0x1f) << 5) | (ppu.fixedB & 0x1f)) : backColor;
         }
       }
     }
 
-    if (globalEnable && mainAffected) {
+    // If clip-to-black applies, override output immediately (no math)
+    if (clipThisPixel) {
+      outColor = 0;
+    } else if (globalEnable && mainAffected) {
       const mr = (mainColor >> 10) & 0x1f; const mg = (mainColor >> 5) & 0x1f; const mb = mainColor & 0x1f;
       const sr = (subColor >> 10) & 0x1f; const sg = (subColor >> 5) & 0x1f; const sb = subColor & 0x1f;
       let r = subtract ? (mr - sr) : (mr + sr);
