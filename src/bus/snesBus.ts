@@ -67,6 +67,8 @@ export class SNESBus implements IMemoryBus {
   private logCount = 0;
   private apuShimEnabled = false; // Env-gated shim to simulate unblank after handshake
   private apuShimCountdownReads = -1;
+  private apuShimDoUnblank = true; // controlled by SMW_APU_SHIM_UNBLANK
+  private apuShimDoTile = true;    // controlled by SMW_APU_SHIM_TILE
 
   constructor(private cart: Cartridge) {
     // Optional MMIO logging controlled by env vars
@@ -77,6 +79,8 @@ export class SNESBus implements IMemoryBus {
       const lim = Number(env.SMW_LOG_LIMIT ?? '1000');
       if (Number.isFinite(lim) && lim > 0) this.logLimit = lim;
       this.apuShimEnabled = env.SMW_APU_SHIM === '1' || env.SMW_APU_SHIM === 'true';
+      this.apuShimDoUnblank = !(env.SMW_APU_SHIM_UNBLANK === '0' || env.SMW_APU_SHIM_UNBLANK === 'false');
+      this.apuShimDoTile = !(env.SMW_APU_SHIM_TILE === '0' || env.SMW_APU_SHIM_TILE === 'false');
     } catch {
       // ignore if process.env not available
     }
@@ -198,38 +202,43 @@ export class SNESBus implements IMemoryBus {
           if (this.apuShimEnabled && this.apuShimCountdownReads > 0) {
             this.apuShimCountdownReads--;
             if (this.apuShimCountdownReads === 0) {
-              // Simulate that the game unblanked and enabled BG1
-              this.ppu.writeReg(0x00, 0x0f); // INIDISP
-              this.ppu.writeReg(0x2c, 0x01); // TM enable BG1
-              // Configure BG1 map/char bases to known values for a visible pixel
-              this.ppu.writeReg(0x07, 0x00); // BG1SC: map base 0x0000, 32x32
-              this.ppu.writeReg(0x0b, 0x10); // BG12NBA: BG1 char base nibble=1 -> 0x0800 words
-              this.ppu.writeReg(0x15, 0x00); // VMAIN +1 word after high
-              // Write a red 4bpp tile at tile index 1 in char base 0x0800
-              const tileBaseWord = 0x0800;
-              const tile1WordBase = tileBaseWord + 16; // 16 words per 4bpp tile
-              for (let y = 0; y < 8; y++) {
-                this.ppu.writeReg(0x16, (tile1WordBase + y) & 0xff);
-                this.ppu.writeReg(0x17, ((tile1WordBase + y) >>> 8) & 0xff);
-                this.ppu.writeReg(0x18, 0xff);
-                this.ppu.writeReg(0x19, 0x00);
+              // Simulate that the game unblanked and enabled BG1 (optional)
+              if (this.apuShimDoUnblank) {
+                this.ppu.writeReg(0x00, 0x0f); // INIDISP
+                this.ppu.writeReg(0x2c, 0x01); // TM enable BG1
               }
-              for (let y = 0; y < 8; y++) {
-                const addr = tile1WordBase + 8 + y;
-                this.ppu.writeReg(0x16, addr & 0xff);
-                this.ppu.writeReg(0x17, (addr >>> 8) & 0xff);
-                this.ppu.writeReg(0x18, 0x00);
+              // Optionally inject a visible BG1 tile and palette for CI visibility
+              if (this.apuShimDoTile) {
+                // Configure BG1 map/char bases to known values for a visible pixel
+                this.ppu.writeReg(0x07, 0x00); // BG1SC: map base 0x0000, 32x32
+                this.ppu.writeReg(0x0b, 0x10); // BG12NBA: BG1 char base nibble=1 -> 0x0800 words
+                this.ppu.writeReg(0x15, 0x00); // VMAIN +1 word after high
+                // Write a red 4bpp tile at tile index 1 in char base 0x0800
+                const tileBaseWord = 0x0800;
+                const tile1WordBase = tileBaseWord + 16; // 16 words per 4bpp tile
+                for (let y = 0; y < 8; y++) {
+                  this.ppu.writeReg(0x16, (tile1WordBase + y) & 0xff);
+                  this.ppu.writeReg(0x17, ((tile1WordBase + y) >>> 8) & 0xff);
+                  this.ppu.writeReg(0x18, 0xff);
+                  this.ppu.writeReg(0x19, 0x00);
+                }
+                for (let y = 0; y < 8; y++) {
+                  const addr = tile1WordBase + 8 + y;
+                  this.ppu.writeReg(0x16, addr & 0xff);
+                  this.ppu.writeReg(0x17, (addr >>> 8) & 0xff);
+                  this.ppu.writeReg(0x18, 0x00);
+                  this.ppu.writeReg(0x19, 0x00);
+                }
+                // Tilemap (0,0) -> tile 1
+                this.ppu.writeReg(0x16, 0x00);
+                this.ppu.writeReg(0x17, 0x00);
+                this.ppu.writeReg(0x18, 0x01);
                 this.ppu.writeReg(0x19, 0x00);
+                // CGRAM palette index 1 = red max
+                this.ppu.writeReg(0x21, 0x02);
+                this.ppu.writeReg(0x22, 0x00);
+                this.ppu.writeReg(0x22, 0x7c);
               }
-              // Tilemap (0,0) -> tile 1
-              this.ppu.writeReg(0x16, 0x00);
-              this.ppu.writeReg(0x17, 0x00);
-              this.ppu.writeReg(0x18, 0x01);
-              this.ppu.writeReg(0x19, 0x00);
-              // CGRAM palette index 1 = red max
-              this.ppu.writeReg(0x21, 0x02);
-              this.ppu.writeReg(0x22, 0x00);
-              this.ppu.writeReg(0x22, 0x7c);
               // End busy; hold ports low
               this.apuPhase = 'done';
               this.apuToCpu[0] = 0x00;
