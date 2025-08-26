@@ -338,7 +338,9 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
   const backColor = ppu.inspectCGRAMWord(0);
 
   // Simplified: global enable controlled by bit5 (legacy for our tests)
-  const globalEnable = (ppu.cgadsub & 0x20) !== 0;
+  // Strict mask mode (flag on PPU) removes dependence on bit5 and uses only per-layer mask bits
+  const strictMask = (ppu as any).cgwStrictMaskMode === true;
+  const globalEnable = strictMask ? true : ((ppu.cgadsub & 0x20) !== 0);
   const subtract = (ppu.cgadsub & 0x80) !== 0;
   const half = (ppu.cgadsub & 0x40) !== 0;
   const mask = ppu.cgadsub & 0x1f; // per-layer select (BG1..BG4/OBJ) + bit5 used as global in tests
