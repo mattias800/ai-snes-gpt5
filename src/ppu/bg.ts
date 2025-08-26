@@ -404,7 +404,10 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
     //  - WOBJSEL: OBJ A=bit0, B=bit1
     let useA = false, useB = false;
     let invA = false, invB = false;
-    if (mainLayer === 1) { useA = (ppu.w12sel & 0x01) !== 0; useB = (ppu.w12sel & 0x02) !== 0; invA = (ppu.w12sel & 0x10) !== 0; invB = (ppu.w12sel & 0x20) !== 0; }
+    if (mainLayer === 0) { // backdrop uses WOBJSEL bits for A/B enable and invert (extended mapping)
+      useA = (ppu.wobjsel & 0x04) !== 0; useB = (ppu.wobjsel & 0x08) !== 0; invA = (ppu.wobjsel & 0x40) !== 0; invB = (ppu.wobjsel & 0x80) !== 0;
+    }
+    else if (mainLayer === 1) { useA = (ppu.w12sel & 0x01) !== 0; useB = (ppu.w12sel & 0x02) !== 0; invA = (ppu.w12sel & 0x10) !== 0; invB = (ppu.w12sel & 0x20) !== 0; }
     else if (mainLayer === 2) { useA = (ppu.w12sel & 0x04) !== 0; useB = (ppu.w12sel & 0x08) !== 0; invA = (ppu.w12sel & 0x40) !== 0; invB = (ppu.w12sel & 0x80) !== 0; }
     else if (mainLayer === 3) { useA = (ppu.w34sel & 0x01) !== 0; useB = (ppu.w34sel & 0x02) !== 0; invA = (ppu.w34sel & 0x10) !== 0; invB = (ppu.w34sel & 0x20) !== 0; }
     else if (mainLayer === 4) { useA = (ppu.wobjsel & 0x01) !== 0; useB = (ppu.wobjsel & 0x02) !== 0; invA = (ppu.wobjsel & 0x10) !== 0; invB = (ppu.wobjsel & 0x20) !== 0; }
@@ -427,10 +430,11 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
 
     // Optional subscreen window gating (CGWSEL bit1): mask subColor by windows using same mapping
     const subGate = (ppu.cgwsel & 0x02) !== 0;
-    if (subGate && subLayer !== 0) {
+    if (subGate) {
       let sUseA = false, sUseB = false;
       let sInvA = false, sInvB = false;
-      if (subLayer === 1) { sUseA = (ppu.w12sel & 0x01) !== 0; sUseB = (ppu.w12sel & 0x02) !== 0; sInvA = (ppu.w12sel & 0x10) !== 0; sInvB = (ppu.w12sel & 0x20) !== 0; }
+      if (subLayer === 0) { sUseA = (ppu.wobjsel & 0x04) !== 0; sUseB = (ppu.wobjsel & 0x08) !== 0; sInvA = (ppu.wobjsel & 0x40) !== 0; sInvB = (ppu.wobjsel & 0x80) !== 0; }
+      else if (subLayer === 1) { sUseA = (ppu.w12sel & 0x01) !== 0; sUseB = (ppu.w12sel & 0x02) !== 0; sInvA = (ppu.w12sel & 0x10) !== 0; sInvB = (ppu.w12sel & 0x20) !== 0; }
       else if (subLayer === 2) { sUseA = (ppu.w12sel & 0x04) !== 0; sUseB = (ppu.w12sel & 0x08) !== 0; sInvA = (ppu.w12sel & 0x40) !== 0; sInvB = (ppu.w12sel & 0x80) !== 0; }
       else if (subLayer === 3) { sUseA = (ppu.w34sel & 0x01) !== 0; sUseB = (ppu.w34sel & 0x02) !== 0; sInvA = (ppu.w34sel & 0x10) !== 0; sInvB = (ppu.w34sel & 0x20) !== 0; }
       else if (subLayer === 4) { sUseA = (ppu.wobjsel & 0x01) !== 0; sUseB = (ppu.wobjsel & 0x02) !== 0; sInvA = (ppu.wobjsel & 0x10) !== 0; sInvB = (ppu.wobjsel & 0x20) !== 0; }
