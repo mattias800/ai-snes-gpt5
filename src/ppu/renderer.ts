@@ -7,6 +7,24 @@ function readByteFromVRAM(ppu: PPU, baseWordAddr: number, byteOffset: number): n
   return (w >>> 8) & 0xff;
 }
 
+// Decode a single 2bpp tile at (baseWordAddr + tileIndex*8 words) into an array of 64 palette indices (0..3)
+export function render2bppTileIndices(ppu: PPU, baseWordAddr: number, tileIndex: number): number[] {
+  const out: number[] = new Array(64);
+  const tileWordBase = baseWordAddr + tileIndex * 8; // 16 bytes = 8 words
+  for (let y = 0; y < 8; y++) {
+    const low0 = readByteFromVRAM(ppu, tileWordBase, y * 2 + 0); // plane 0
+    const low1 = readByteFromVRAM(ppu, tileWordBase, y * 2 + 1); // plane 1
+    for (let x = 0; x < 8; x++) {
+      const bit = 7 - x;
+      const p0 = (low0 >> bit) & 1;
+      const p1 = (low1 >> bit) & 1;
+      const idx = (p1 << 1) | p0;
+      out[y * 8 + x] = idx;
+    }
+  }
+  return out;
+}
+
 // Decode a single 4bpp tile at (baseWordAddr + tileIndex*16 words) into an array of 64 palette indices.
 export function render4bppTileIndices(ppu: PPU, baseWordAddr: number, tileIndex: number): number[] {
   const out: number[] = new Array(64);

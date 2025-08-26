@@ -1,7 +1,7 @@
 import { IMemoryBus, Byte, Word } from '../emulator/types';
 import { Cartridge } from '../cart/cartridge';
 import { PPU } from '../ppu/ppu';
-import { Controller } from '../input/controller';
+import { Controller, Button } from '../input/controller';
 
 // Partial SNES Bus focusing on ROM, WRAM, MMIO, and basic DMA for tests.
 export class SNESBus implements IMemoryBus {
@@ -16,6 +16,18 @@ export class SNESBus implements IMemoryBus {
     return this.ppu;
   }
 
+  // Deterministic input helper for tests: set controller 1 state and latch it
+  public setController1State(state: Partial<Record<Button, boolean>>): void {
+    const order: Button[] = ['B', 'Y', 'Select', 'Start', 'Up', 'Down', 'Left', 'Right', 'A', 'X', 'L', 'R'];
+    for (const btn of order) {
+      const pressed = !!state[btn];
+      this.controller1.setButton(btn, pressed);
+    }
+    // Strobe to latch and reset shift position
+    this.controller1.writeStrobe(1);
+    this.controller1.writeStrobe(0);
+  }
+
   // DMA channel registers (8 channels, base $4300 + 0x10*ch)
   private dmap = new Uint8Array(8);   // $43x0
   private bbad = new Uint8Array(8);   // $43x1
@@ -27,7 +39,42 @@ export class SNESBus implements IMemoryBus {
   private controller1 = new Controller();
   private ctrlStrobe = 0;
 
-  constructor(private cart: Cartridge) {}
+  // APU I/O stub ports
+  private apuToCpu = new Uint8Array(4); // values read by CPU at $2140-$2143
+  private cpuToApu = new Uint8Array(4); // last written by CPU at $2140-$2143
+  private apuPolls = 0;
+
+  // CPU I/O registers we model minimally
+  private nmitimen = 0; // $4200 (bit7 enables NMI)
+  private nmiOccurred = 0; // latched NMI flag for $4210 bit7
+
+  // Math registers (8x8 multiply, 16/8 divide)
+  private wrmpya = 0; // $4202
+  private wrmpyb = 0; // $4203 (write triggers multiply)
+  private wrdiv = 0;  // $4204/$4205 16-bit dividend
+  private wrdivb = 0; // $4206 divisor (write triggers division)
+
+  private mulProduct = 0;     // 16-bit product
+  private divQuotient = 0;    // 16-bit quotient
+  private divRemainder = 0;   // 16-bit remainder
+  private lastMathOp: 'none' | 'mul' | 'div' = 'none';
+
+  private logMMIO = false;
+  private logLimit = 1000;
+  private logCount = 0;
+
+  constructor(private cart: Cartridge) {
+    // Optional MMIO logging controlled by env vars
+    try {
+      // @ts-ignore
+      const env = (globalThis as any).process?.env ?? {};
+      this.logMMIO = env.SMW_LOG_MMIO === '1' || env.SMW_LOG_MMIO === 'true';
+      const lim = Number(env.SMW_LOG_LIMIT ?? '1000');
+      if (Number.isFinite(lim) && lim > 0) this.logLimit = lim;
+    } catch {
+      // ignore if process.env not available
+    }
+  }
 
   // Internal helper to access WRAM linear index
   private wramIndex(bank: number, off: number): number {
@@ -38,14 +85,102 @@ export class SNESBus implements IMemoryBus {
     const bank = (addr >>> 16) & 0xff;
     const off = addr & 0xffff;
 
+    // Optional MMIO read logging
+    const isPPU = (off & 0xff00) === 0x2100;
+    const isCPU = (off >= 0x4200 && off <= 0x421f) || off === 0x4016;
+    const shouldLog = this.logMMIO && (isPPU || isCPU) && this.logCount < this.logLimit;
+
     // WRAM mirrors
     if (bank === 0x7e || bank === 0x7f) {
       return this.wram[this.wramIndex(bank, off)];
     }
+    // Low WRAM mirrors in banks 00-3F and 80-BF at $0000-$1FFF
+    if (((bank <= 0x3f) || (bank >= 0x80 && bank <= 0xbf)) && off < 0x2000) {
+      return this.wram[off & 0x1fff];
+    }
 
-    // PPU MMIO $2100-$21FF
-    if ((off & 0xff00) === 0x2100) {
-      return this.ppu.readReg(off & 0x00ff);
+    // PPU MMIO $2100-$213F only
+    if (off >= 0x2100 && off <= 0x213f) {
+      const v = this.ppu.readReg(off & 0x00ff);
+      if (shouldLog) {
+        // eslint-disable-next-line no-console
+        console.log(`[MMIO] R ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} -> ${v.toString(16).padStart(2,'0')}`);
+        this.logCount++;
+      }
+      return v;
+    }
+
+    // APU/io and CPU status ports
+
+    // $4210 RDNMI: NMI occurred latch (bit7). Read clears the latch.
+    if (off === 0x4210) {
+      const v = (this.nmiOccurred ? 0x80 : 0x00);
+      this.nmiOccurred = 0;
+      if (shouldLog) {
+        // eslint-disable-next-line no-console
+        console.log(`[MMIO] R ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} -> ${v.toString(16).padStart(2,'0')}`);
+        this.logCount++;
+      }
+      return v;
+    }
+
+    // $4212 HVBJOY: VBlank status on bit7, HBlank status on bit6
+    if (off === 0x4212) {
+      const vblank = this.ppu.scanline >= 224; // simple model: lines >=224 are VBlank
+      const hblank = this.ppu.hblank;
+      const v = (vblank ? 0x80 : 0x00) | (hblank ? 0x40 : 0x00);
+      if (shouldLog) {
+        // eslint-disable-next-line no-console
+        console.log(`[MMIO] R ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} -> ${v.toString(16).padStart(2,'0')}`);
+        this.logCount++;
+      }
+      return v;
+    }
+
+    // $4214/$4215: RDDIVL/RDDIVH (quotient low/high)
+    if (off === 0x4214) {
+      const v = this.divQuotient & 0xff;
+      if (shouldLog) { console.log(`[MMIO] R ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} -> ${v.toString(16).padStart(2,'0')}`); this.logCount++; }
+      return v;
+    }
+    if (off === 0x4215) {
+      const v = (this.divQuotient >>> 8) & 0xff;
+      if (shouldLog) { console.log(`[MMIO] R ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} -> ${v.toString(16).padStart(2,'0')}`); this.logCount++; }
+      return v;
+    }
+
+    // $4216/$4217: RDMPYL/RDMPYH (product low/high if last op multiply; remainder if last op divide)
+    if (off === 0x4216) {
+      let v = 0x00;
+      if (this.lastMathOp === 'mul') v = this.mulProduct & 0xff;
+      else if (this.lastMathOp === 'div') v = this.divRemainder & 0xff;
+      if (shouldLog) { console.log(`[MMIO] R ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} -> ${v.toString(16).padStart(2,'0')}`); this.logCount++; }
+      return v;
+    }
+    if (off === 0x4217) {
+      let v = 0x00;
+      if (this.lastMathOp === 'mul') v = (this.mulProduct >>> 8) & 0xff;
+      else if (this.lastMathOp === 'div') v = (this.divRemainder >>> 8) & 0xff;
+      if (shouldLog) { console.log(`[MMIO] R ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} -> ${v.toString(16).padStart(2,'0')}`); this.logCount++; }
+      return v;
+    }
+
+    // APU I/O ports $2140-$2143
+    if (off >= 0x2140 && off <= 0x2143) {
+      const idx = off - 0x2140;
+      let v = this.apuToCpu[idx] & 0xff;
+      // Simple handshake: after many polls on port0/1, pretend APU responded
+      if (idx <= 1) {
+        this.apuPolls++;
+        if (this.apuPolls === 256) this.apuToCpu[0] = 0xaa;
+        if (this.apuPolls === 384) this.apuToCpu[1] = 0xbb;
+        v = this.apuToCpu[idx] & 0xff;
+      }
+      if (shouldLog) {
+        console.log(`[MMIO] R ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} -> ${v.toString(16).padStart(2,'0')}`);
+        this.logCount++;
+      }
+      return v;
     }
 
     // APU/io ranges not implemented for read
@@ -122,14 +257,40 @@ export class SNESBus implements IMemoryBus {
     const bank = (addr >>> 16) & 0xff;
     const off = addr & 0xffff;
 
+    // Optional MMIO logging for $2100-$21FF and $4200-$421F and $4016
+    const isPPU = (off & 0xff00) === 0x2100;
+    const isCPU = (off >= 0x4200 && off <= 0x421f) || off === 0x4016;
+    if (this.logMMIO && (isPPU || isCPU) && this.logCount < this.logLimit) {
+      // eslint-disable-next-line no-console
+      console.log(`[MMIO] W ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} <- ${value.toString(16).padStart(2,'0')}`);
+      this.logCount++;
+    }
+
     if (bank === 0x7e || bank === 0x7f) {
       this.wram[this.wramIndex(bank, off)] = value & 0xff;
       return;
     }
+    // Low WRAM mirrors in banks 00-3F and 80-BF at $0000-$1FFF
+    if (((bank <= 0x3f) || (bank >= 0x80 && bank <= 0xbf)) && off < 0x2000) {
+      this.wram[off & 0x1fff] = value & 0xff;
+      return;
+    }
 
-    // PPU MMIO $2100-$21FF
-    if ((off & 0xff00) === 0x2100) {
+    // PPU MMIO $2100-$213F only
+    if (off >= 0x2100 && off <= 0x213f) {
       this.ppu.writeReg(off & 0x00ff, value & 0xff);
+      return;
+    }
+
+    // APU I/O ports $2140-$2143
+    if (off >= 0x2140 && off <= 0x2143) {
+      const idx = off - 0x2140;
+      this.cpuToApu[idx] = value & 0xff;
+      // Optionally react to certain values to simulate handshake immediate ack
+      if (idx === 0 && value === 0x00 && this.apuToCpu[0] === 0) {
+        // first poke, respond ready after a short while
+        this.apuToCpu[0] = 0xaa;
+      }
       return;
     }
 
@@ -154,6 +315,44 @@ export class SNESBus implements IMemoryBus {
         case 0x6: this.das[ch] = (this.das[ch] & 0x00ff) | (value << 8); break; // DAS high
         // Others ignored for now
       }
+      return;
+    }
+
+    // NMITIMEN $4200
+    if (off === 0x4200) {
+      this.nmitimen = value & 0xff;
+      return;
+    }
+
+    // Multiply/Divide registers
+    if (off === 0x4202) { // WRMPYA (multiplicand A)
+      this.wrmpya = value & 0xff;
+      return;
+    }
+    if (off === 0x4203) { // WRMPYB (multiplicand B) -> trigger 8x8 multiply
+      this.wrmpyb = value & 0xff;
+      this.mulProduct = (this.wrmpya * this.wrmpyb) & 0xffff;
+      this.lastMathOp = 'mul';
+      return;
+    }
+    if (off === 0x4204) { // WRDIVL (dividend low)
+      this.wrdiv = (this.wrdiv & 0xff00) | (value & 0xff);
+      return;
+    }
+    if (off === 0x4205) { // WRDIVH (dividend high)
+      this.wrdiv = ((value & 0xff) << 8) | (this.wrdiv & 0xff);
+      return;
+    }
+    if (off === 0x4206) { // WRDIVB (divisor) -> trigger 16/8 divide
+      this.wrdivb = value & 0xff;
+      if (this.wrdivb === 0) {
+        this.divQuotient = 0xffff;
+        this.divRemainder = this.wrdiv & 0xffff;
+      } else {
+        this.divQuotient = Math.floor((this.wrdiv & 0xffff) / this.wrdivb) & 0xffff;
+        this.divRemainder = ((this.wrdiv & 0xffff) % this.wrdivb) & 0xffff;
+      }
+      this.lastMathOp = 'div';
       return;
     }
 
@@ -185,6 +384,16 @@ export class SNESBus implements IMemoryBus {
     const a = addr & 0xffffff;
     this.write8(a, value & 0xff);
     this.write8((a + 1) & 0xffffff, (value >>> 8) & 0xff);
+  }
+
+  // Minimal NMI enable query for scheduler
+  public isNMIEnabled(): boolean {
+    return (this.nmitimen & 0x80) !== 0;
+  }
+
+  // Called by scheduler at end-of-frame when NMI is triggered
+  public pulseNMI(): void {
+    this.nmiOccurred = 1;
   }
 }
 
