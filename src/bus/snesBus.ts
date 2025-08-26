@@ -44,6 +44,8 @@ export class SNESBus implements IMemoryBus {
   private cpuToApu = new Uint8Array(4); // last written by CPU at $2140-$2143
   private apuPolls = 0;
   private apuHandshakeSeenCC = false;
+  private apuPhase: 'boot' | 'acked' | 'busy' | 'done' = 'boot';
+  private apuBusyReadCount = 0;
 
   // CPU I/O registers we model minimally
   private nmitimen = 0; // $4200 (bit7 enables NMI)
@@ -63,6 +65,8 @@ export class SNESBus implements IMemoryBus {
   private logMMIO = false;
   private logLimit = 1000;
   private logCount = 0;
+  private apuShimEnabled = false; // Env-gated shim to simulate unblank after handshake
+  private apuShimCountdownReads = -1;
 
   constructor(private cart: Cartridge) {
     // Optional MMIO logging controlled by env vars
@@ -72,12 +76,14 @@ export class SNESBus implements IMemoryBus {
       this.logMMIO = env.SMW_LOG_MMIO === '1' || env.SMW_LOG_MMIO === 'true';
       const lim = Number(env.SMW_LOG_LIMIT ?? '1000');
       if (Number.isFinite(lim) && lim > 0) this.logLimit = lim;
+      this.apuShimEnabled = env.SMW_APU_SHIM === '1' || env.SMW_APU_SHIM === 'true';
     } catch {
       // ignore if process.env not available
     }
     // Initialize simple APU handshake values so games can progress without a real SPC700
     this.apuToCpu[0] = 0xaa; // common boot handshake value
     this.apuToCpu[1] = 0xbb;
+    this.apuPhase = 'boot';
     this.apuToCpu[2] = 0x00;
     this.apuToCpu[3] = 0x00;
   }
@@ -175,7 +181,41 @@ export class SNESBus implements IMemoryBus {
     if (off >= 0x2140 && off <= 0x2143) {
       const idx = off - 0x2140;
       let v = this.apuToCpu[idx] & 0xff;
-      // Simple handshake: keep stable values unless we've transitioned phases via CPU writes
+
+      // After ACK, emulate a minimal busy/ready toggle on port0 to break simple wait loops
+      if (idx === 0) {
+        if (this.apuPhase === 'acked') {
+          // Begin busy phase
+          this.apuPhase = 'busy';
+          this.apuBusyReadCount = 0;
+        }
+        if (this.apuPhase === 'busy') {
+          // Toggle bit7 (0x80) every 16 reads to simulate a service loop
+          this.apuBusyReadCount++;
+          v = (Math.floor(this.apuBusyReadCount / 16) % 2) ? 0x80 : 0x00;
+          this.apuToCpu[0] = v;
+          // Shim: countdown to unblank
+          if (this.apuShimEnabled && this.apuShimCountdownReads > 0) {
+            this.apuShimCountdownReads--;
+            if (this.apuShimCountdownReads === 0) {
+              // Simulate that the game unblanked and enabled BG1
+              this.ppu.writeReg(0x00, 0x0f); // INIDISP
+              this.ppu.writeReg(0x2c, 0x01); // TM enable BG1
+              // End busy; hold ports low
+              this.apuPhase = 'done';
+              this.apuToCpu[0] = 0x00;
+              this.apuToCpu[1] = 0x00;
+            }
+          }
+          // After enough toggles, mark done and hold at 0x00 (fallback)
+          if (this.apuBusyReadCount > 2048 && !this.apuShimEnabled) {
+            this.apuPhase = 'done';
+            this.apuToCpu[0] = 0x00;
+            this.apuToCpu[1] = 0x00;
+          }
+        }
+      }
+
       if (shouldLog) {
         console.log(`[MMIO] R ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} -> ${v.toString(16).padStart(2,'0')}`);
         this.logCount++;
@@ -294,6 +334,13 @@ export class SNESBus implements IMemoryBus {
       if (idx === 0 && value === 0xcc) {
         this.apuHandshakeSeenCC = true;
         this.apuToCpu[0] = 0x00; // acknowledge
+        // Move to ACKed phase; reads will transition to busy toggle
+        this.apuPhase = 'acked';
+        // If shim enabled, arm a countdown so we simulate progress to unblank
+        if (this.apuShimEnabled) {
+          // After a short while of CPU polling port0, simulate that APU init completed.
+          this.apuShimCountdownReads = 256; // number of reads from $2140 until we unblank
+        }
       }
       if (idx === 1 && value === 0x01 && this.apuHandshakeSeenCC) {
         // Clear port1 as part of ack transition
