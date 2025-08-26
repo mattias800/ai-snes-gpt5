@@ -2,6 +2,14 @@
 
 This repository includes a simple headless runner to execute the emulator for a number of frames and dump a PNG screenshot of the main screen buffer using pngjs.
 
+APU shim (env-gated)
+- To aid development without a full SPC700, you can enable a minimal APU shim via environment flags. These only affect behavior when explicitly enabled; by default, nothing changes.
+  - SMW_APU_SHIM=1: enable the shim.
+  - SMW_APU_SHIM_UNBLANK=0|1: if 1 (default), the shim clears forced blank and enables BG1 after the initial handshake.
+  - SMW_APU_SHIM_TILE=0|1: if 1 (default), the shim injects a small BG1 tile and a red palette entry to guarantee a visible pixel for CI and debugging.
+
+These flags are intended only for development and automated verification with a commercial ROM; the rest of the tests are independent and deterministic.
+
 Requirements
 - Node.js (ESM-enabled; this repo sets "type": "module").
 - devDependencies installed (pnpm i / npm i). The runner uses:
@@ -25,6 +33,16 @@ Usage
    - --ips: instructions per scheduler slice (default: 200 or SMW_IPS env)
    - --width, --height: output dimensions (default: 256x224)
    - --holdStart: whether to hold Start during run for deterministic boot behavior (default: 1)
+   - --debug=0|1: print PPU and memory stats, plus a simple output sanity metric
+   - --forceUnblank=0|1: manually clear forced blank and set brightness before capture
+   - --forceEnableBG1=0|1: manually enable BG1 on the main screen before capture
+   - --autoFallback=0|1: inject a minimal BG1 tile and palette if the ROM hasn’t drawn yet (default: 1)
+
+   Relevant environment variables:
+   - SMW_ROM: default ROM path
+   - SMW_APU_SHIM, SMW_APU_SHIM_UNBLANK, SMW_APU_SHIM_TILE: see APU shim notes above
+   - SMW_FRAMES, SMW_IPS: defaults for frames and scheduler IPS
+   - SMW_CPUERR: default onCpuError behavior (ignore|throw|record)
 
 Implementation details
 - Loads the ROM via normaliseRom + parseHeader to detect mapping.
