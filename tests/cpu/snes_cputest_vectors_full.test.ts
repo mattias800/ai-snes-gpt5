@@ -4,7 +4,7 @@ import * as path from 'path';
 import { TestMemoryBus } from '../../src/bus/testMemoryBus';
 import { CPU65C816, Flag } from '../../src/cpu/cpu65c816';
 import { parseCpuVectors, discoverCpuTestsRoot } from '../../src/third_party/snesTests/parseCpuVectors';
-import { assembleAluSubset, AssembleUnsupportedError } from '../../src/third_party/snesTests/assemble65c816';
+import { assemble, AssembleUnsupportedError } from '../../src/third_party/snesTests/assemble65c816';
 
 function m8FromP_E(P: number, E: boolean): boolean { return E || ((P & Flag.M) !== 0); }
 function x8FromP_E(P: number, E: boolean): boolean { return E || ((P & Flag.X) !== 0); }
@@ -22,10 +22,23 @@ runIf('Third-party snes-tests: CPU vectors (ALU subset; data-gated)', () => {
     return;
   }
 
-  // Parse vectors and filter to the subset we currently assemble
+  // Parse vectors and filter to the subset we currently assemble (broad set, still skip scaffolding)
+  const ALLOWED = new Set([
+    'adc','and','eor','ora','sbc',
+    'lda','ldx','ldy',
+    'sta','stx','sty','stz',
+    'bit','tsb','trb',
+    'asl','lsr','rol','ror',
+    'inc','dec','inx','iny','dex','dey',
+    'cmp','cpx','cpy',
+    'clc','cld','cli','clv','sec','sed','sei',
+    'tax','tay','txa','tya','tsx','txs','tcs','tsc','tcd','tdc','txy','tyx','xba','xce',
+    'nop','wdm','pha','pla','phx','plx','phy','ply','phb','plb','phd','pld','phk','php','plp',
+    'rep','sep'
+  ]);
   const vectors = parseCpuVectors(listFile, { limit: limit > 0 ? limit : undefined })
     .filter(v => !v.requiresScaffolding)
-    .filter(v => ['adc','and','eor','ora','sbc'].includes(v.op));
+    .filter(v => ALLOWED.has(v.op));
 
   if (vectors.length === 0) {
     it.skip('no runnable vectors found for ALU subset', () => {});
@@ -62,7 +75,7 @@ runIf('Third-party snes-tests: CPU vectors (ALU subset; data-gated)', () => {
       // Assemble the instruction and write at 00:8000
       let bytes: Uint8Array;
       try {
-        bytes = assembleAluSubset(v, { m8, x8, e: E });
+        bytes = assemble(v, { m8, x8, e: E });
       } catch (e) {
         if (e instanceof AssembleUnsupportedError) {
           // Skip if we don't yet encode this combination

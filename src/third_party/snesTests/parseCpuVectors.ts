@@ -54,6 +54,10 @@ function normalizeOperand(ins: string): { mode: AddressingMode; operands: CpuVec
   const trimmed = semi >= 0 ? s.slice(0, semi).trim() : s;
   const parts = trimmed.split(/\s+/, 2);
   const operand = parts[1] || '';
+  if (operand.length === 0) {
+    // Implied instruction (no operand)
+    return { mode: 'impl', operands: {} };
+  }
 
   // Immediate #$nn or #$nnnn
   let m: RegExpMatchArray | null;
@@ -125,6 +129,14 @@ function normalizeOperand(ins: string): { mode: AddressingMode; operands: CpuVec
 
   // Branch rel8/rel16 — not executed initially; we’ll classify as rel to allow filtering
   if (/^(\+|\-)\d+$/i.test(operand)) return { mode: 'rel8', operands: {} };
+  // Generic signed 16-bit immediate form like -$8000 (used by PER in insDisplay)
+  let m2 = operand.match(/^([+-]?)(?:\$)?([0-9a-fA-F]{1,4})$/);
+  if (m2) {
+    const sign = m2[1] === '-' ? -1 : 1;
+    const v = (hexToInt(m2[2]) & 0xffff) * sign;
+    const imm16 = (v & 0xffff);
+    return { mode: 'rel16', operands: { imm: imm16 } };
+  }
 
   // No recognizable operand — treat as implied (unsupported by runner)
   return null;

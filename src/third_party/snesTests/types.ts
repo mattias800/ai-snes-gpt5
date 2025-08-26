@@ -4,6 +4,7 @@ import { Flag } from '../../cpu/cpu65c816';
 export type AddressingMode =
   | 'imm'
   | 'accum'
+  | 'impl'
   | 'dp'
   | 'dpX'
   | 'dpY'
