@@ -43,6 +43,7 @@ export class SNESBus implements IMemoryBus {
   private apuToCpu = new Uint8Array(4); // values read by CPU at $2140-$2143
   private cpuToApu = new Uint8Array(4); // last written by CPU at $2140-$2143
   private apuPolls = 0;
+  private apuHandshakeSeenCC = false;
 
   // CPU I/O registers we model minimally
   private nmitimen = 0; // $4200 (bit7 enables NMI)
@@ -74,6 +75,11 @@ export class SNESBus implements IMemoryBus {
     } catch {
       // ignore if process.env not available
     }
+    // Initialize simple APU handshake values so games can progress without a real SPC700
+    this.apuToCpu[0] = 0xaa; // common boot handshake value
+    this.apuToCpu[1] = 0xbb;
+    this.apuToCpu[2] = 0x00;
+    this.apuToCpu[3] = 0x00;
   }
 
   // Internal helper to access WRAM linear index
@@ -169,13 +175,7 @@ export class SNESBus implements IMemoryBus {
     if (off >= 0x2140 && off <= 0x2143) {
       const idx = off - 0x2140;
       let v = this.apuToCpu[idx] & 0xff;
-      // Simple handshake: after many polls on port0/1, pretend APU responded
-      if (idx <= 1) {
-        this.apuPolls++;
-        if (this.apuPolls === 256) this.apuToCpu[0] = 0xaa;
-        if (this.apuPolls === 384) this.apuToCpu[1] = 0xbb;
-        v = this.apuToCpu[idx] & 0xff;
-      }
+      // Simple handshake: keep stable values unless we've transitioned phases via CPU writes
       if (shouldLog) {
         console.log(`[MMIO] R ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} -> ${v.toString(16).padStart(2,'0')}`);
         this.logCount++;
@@ -286,10 +286,18 @@ export class SNESBus implements IMemoryBus {
     if (off >= 0x2140 && off <= 0x2143) {
       const idx = off - 0x2140;
       this.cpuToApu[idx] = value & 0xff;
-      // Optionally react to certain values to simulate handshake immediate ack
-      if (idx === 0 && value === 0x00 && this.apuToCpu[0] === 0) {
-        // first poke, respond ready after a short while
-        this.apuToCpu[0] = 0xaa;
+
+      // Heuristic handshake for common boot code (e.g., SMW):
+      // - CPU polls port0 until it reads 0xAA
+      // - CPU writes 0x01 to port1 and 0xCC to port0 to initiate transfer/reset
+      // - APU responds by clearing port0 to 0x00 to acknowledge
+      if (idx === 0 && value === 0xcc) {
+        this.apuHandshakeSeenCC = true;
+        this.apuToCpu[0] = 0x00; // acknowledge
+      }
+      if (idx === 1 && value === 0x01 && this.apuHandshakeSeenCC) {
+        // Clear port1 as part of ack transition
+        this.apuToCpu[1] = 0x00;
       }
       return;
     }
