@@ -201,6 +201,35 @@ export class SNESBus implements IMemoryBus {
               // Simulate that the game unblanked and enabled BG1
               this.ppu.writeReg(0x00, 0x0f); // INIDISP
               this.ppu.writeReg(0x2c, 0x01); // TM enable BG1
+              // Configure BG1 map/char bases to known values for a visible pixel
+              this.ppu.writeReg(0x07, 0x00); // BG1SC: map base 0x0000, 32x32
+              this.ppu.writeReg(0x0b, 0x10); // BG12NBA: BG1 char base nibble=1 -> 0x0800 words
+              this.ppu.writeReg(0x15, 0x00); // VMAIN +1 word after high
+              // Write a red 4bpp tile at tile index 1 in char base 0x0800
+              const tileBaseWord = 0x0800;
+              const tile1WordBase = tileBaseWord + 16; // 16 words per 4bpp tile
+              for (let y = 0; y < 8; y++) {
+                this.ppu.writeReg(0x16, (tile1WordBase + y) & 0xff);
+                this.ppu.writeReg(0x17, ((tile1WordBase + y) >>> 8) & 0xff);
+                this.ppu.writeReg(0x18, 0xff);
+                this.ppu.writeReg(0x19, 0x00);
+              }
+              for (let y = 0; y < 8; y++) {
+                const addr = tile1WordBase + 8 + y;
+                this.ppu.writeReg(0x16, addr & 0xff);
+                this.ppu.writeReg(0x17, (addr >>> 8) & 0xff);
+                this.ppu.writeReg(0x18, 0x00);
+                this.ppu.writeReg(0x19, 0x00);
+              }
+              // Tilemap (0,0) -> tile 1
+              this.ppu.writeReg(0x16, 0x00);
+              this.ppu.writeReg(0x17, 0x00);
+              this.ppu.writeReg(0x18, 0x01);
+              this.ppu.writeReg(0x19, 0x00);
+              // CGRAM palette index 1 = red max
+              this.ppu.writeReg(0x21, 0x02);
+              this.ppu.writeReg(0x22, 0x00);
+              this.ppu.writeReg(0x22, 0x7c);
               // End busy; hold ports low
               this.apuPhase = 'done';
               this.apuToCpu[0] = 0x00;
