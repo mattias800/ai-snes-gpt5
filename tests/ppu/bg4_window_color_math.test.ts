@@ -22,7 +22,7 @@ function writeBG4SolidTile0(bus: SNESBus, charBaseWords: number) {
   }
 }
 
-describe.skip('BG4 window gating (2bpp like BG3) with color math', () => {
+describe('BG4 window gating (2bpp like BG3) with color math', () => {
   it('applyInside=1: window A enables blend over BG4 main', () => {
     const bus = mkBus();
     const ppu = bus.getPPU();
@@ -37,8 +37,8 @@ describe.skip('BG4 window gating (2bpp like BG3) with color math', () => {
     w8(bus, mmio(0x0a), 0x00); // map base 0
     w8(bus, mmio(0x0c), 0x01); // BG4 char base nibble=1 -> 0x0800 words; BG3 nibble=0
 
-    // BG2 map/char for subscreen green
-    w8(bus, mmio(0x08), 0x00);
+    // BG2 map/char for subscreen green; place BG2 tilemap at word 0x0200 to avoid overlap with BG4 tilemap
+    w8(bus, mmio(0x08), 0x04); // map base offset -> word 0x0200
     w8(bus, mmio(0x0b), 0x22);
 
     // Make BG4 tile 0 solid index 1
@@ -46,14 +46,14 @@ describe.skip('BG4 window gating (2bpp like BG3) with color math', () => {
 
     // BG4 tilemap entry 0 -> tile 0, pal group 0
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x00); w8(bus, mmio(0x19), 0x00);
-    // BG2 tilemap entry 0 -> tile 1 pal group 1 (solid will be index1 too)
+    // BG2 tilemap entry at word 0x0200 -> tile 1 pal group 1 (solid will be index1 too)
     for (let y = 0; y < 8; y++) {
       w8(bus, mmio(0x16), (0x1000 + 16 + y) & 0xff);
       w8(bus, mmio(0x17), ((0x1000 + 16 + y) >>> 8) & 0xff);
       w8(bus, mmio(0x18), 0xff);
       w8(bus, mmio(0x19), 0x00);
     }
-    w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x04);
+    w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x02); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x04);
 
     // CGRAM: index1 red, index17 green
     w8(bus, mmio(0x21), 2); w8(bus, mmio(0x22), 0x00); w8(bus, mmio(0x22), 0x7c);
