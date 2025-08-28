@@ -818,17 +818,15 @@ this.dbg(`[ADC abs,Y] m8=0 DBR=$${(effBank & 0xff).toString(16).padStart(2,'0')}
       }
       case 0x71: { // ADC (dp),Y
         const dp = this.fetch8();
-        const basePtr = this.dpPtr16(dp);
-        const idx = this.indexY();
-        const { bank, addr: eff } = this.addIndexToAddress(this.state.DBR & 0xff, basePtr as Word, idx);
+        const { bank, addr: eff } = this.effIndDPY(dp);
         if (this.m8) {
           const m = this.read8(bank, eff);
-          this.dbg(`[ADC (dp),Y] m8=1 DBR=$${(bank & 0xff).toString(16).padStart(2,'0')} base=$${(basePtr & 0xffff).toString(16).padStart(4,'0')} idx=$${(idx & 0xffff).toString(16).padStart(4,'0')} eff=$${eff.toString(16).padStart(4,'0')} Y=$${(this.state.Y & 0xff).toString(16).padStart(2,'0')} A_pre=$${(this.state.A & 0xff).toString(16).padStart(2,'0')} m=$${m.toString(16).padStart(2,'0')}`);
+          this.dbg(`[ADC (dp),Y] m8=1 DBR=$${(bank & 0xff).toString(16).padStart(2,'0')} eff=$${eff.toString(16).padStart(4,'0')} Y=$${(this.state.Y & 0xff).toString(16).padStart(2,'0')} A_pre=$${(this.state.A & 0xff).toString(16).padStart(2,'0')} m=$${m.toString(16).padStart(2,'0')}`);
           this.adc(m);
           this.dbg(`[ADC (dp),Y] -> A=$${(this.state.A & 0xff).toString(16).padStart(2,'0')} P=$${(this.state.P & 0xff).toString(16).padStart(2,'0')}`);
         } else {
           const m = this.read16(bank, eff);
-          this.dbg(`[ADC (dp),Y] m8=0 DBR=$${(bank & 0xff).toString(16).padStart(2,'0')} base=$${(basePtr & 0xffff).toString(16).padStart(4,'0')} idx=$${(idx & 0xffff).toString(16).padStart(4,'0')} eff=$${eff.toString(16).padStart(4,'0')} Y=$${(this.state.Y & (this.x8?0xff:0xffff)).toString(16).padStart(this.x8?2:4,'0')} A_pre=$${(this.state.A & 0xffff).toString(16).padStart(4,'0')} m16=$${m.toString(16).padStart(4,'0')}`);
+          this.dbg(`[ADC (dp),Y] m8=0 DBR=$${(bank & 0xff).toString(16).padStart(2,'0')} eff=$${eff.toString(16).padStart(4,'0')} Y=$${(this.state.Y & (this.x8?0xff:0xffff)).toString(16).padStart(this.x8?2:4,'0')} A_pre=$${(this.state.A & 0xffff).toString(16).padStart(4,'0')} m16=$${m.toString(16).padStart(4,'0')}`);
           this.adc(m);
           this.dbg(`[ADC (dp),Y] -> A=$${(this.state.A & 0xffff).toString(16).padStart(4,'0')} P=$${(this.state.P & 0xff).toString(16).padStart(2,'0')}`);
         }
