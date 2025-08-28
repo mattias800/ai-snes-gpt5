@@ -31,14 +31,16 @@ describe('CPU65C816 reset and NOP', () => {
     expect(cpu.state.PC).toBe(0x8001);
   });
 
-  it('throws on unimplemented opcode (WDM $42)', () => {
+  it('WDM $42 executes and consumes one operand byte', () => {
     const bus = new TestMemoryBus();
     writeResetVector(bus, 0x1234);
-    bus.write8((0x00 << 16) | 0x1234, 0x42); // WDM (not implemented)
+    bus.write8((0x00 << 16) | 0x1234, 0x42); // WDM
+    bus.write8((0x00 << 16) | 0x1235, 0x99); // operand byte
 
     const cpu = new CPU65C816(bus);
     cpu.reset();
-    expect(() => cpu.stepInstruction()).toThrowError(/Unimplemented opcode/);
+    cpu.stepInstruction();
+    expect(cpu.state.PC).toBe(0x1236);
   });
 });
 

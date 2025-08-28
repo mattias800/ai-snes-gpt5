@@ -50,8 +50,8 @@ describe('CPU low-power instructions WAI/STP', () => {
         // Program: WAI; NOP
         bus.write8((0x00 << 16) | start, 0xcb); // WAI
         bus.write8((0x00 << 16) | ((start + 1) & 0xffff), 0xea); // NOP
-        // NMI vector $FFEA/$FFEB -> nmiHandler
-        setVector(bus, 0xffea, nmiHandler);
+        // NMI vector (emulation mode) $FFFA/$FFFB -> nmiHandler
+        setVector(bus, 0xfffa, nmiHandler);
         // NMI handler: RTI
         bus.write8((0x00 << 16) | nmiHandler, 0x40);
         const cpu = new CPU65C816(bus);

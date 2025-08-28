@@ -374,7 +374,6 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
   // Minimal OBJ sampler: iterate OAM entries (128 max), 8x8 or 16x16 4bpp, H/V flips via attr; bit0 used as high X (adds 256).
   function sampleOBJPixel(x: number, y: number): { pal: number; zero: boolean; pri: number } {
     let best = { pal: 0, zero: true, pri: -1, idx: 9999 } as { pal: number; zero: boolean; pri: number; idx: number };
-    const size = ppu.objSize16 ? 16 : 8;
     for (let i = 0; i < 128; i++) {
       const base = i * 4;
       const oy = ppu.inspectOAMByte(base) | 0;

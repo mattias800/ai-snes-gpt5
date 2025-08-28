@@ -14,7 +14,12 @@
     "smw:smoke": "tsx scripts/smw_smoke.ts",
     "setup:snes-tests": "unzip -o third_party/snes-tests/snes-tests.zip -d third_party/snes-tests/",
     "test:snes-vectors": "SNES_TESTS_DIR=third_party/snes-tests npx vitest run --reporter=dot tests/cpu/snes_cputest_vectors_full.test.ts",
-    "test:snes-vectors:full": "CPU_VECTORS_MODE=full SNES_TESTS_DIR=third_party/snes-tests npx vitest run --reporter=dot tests/cpu/snes_cputest_vectors_full.test.ts"
+    "test:snes-vectors:full": "CPU_VECTORS_MODE=full SNES_TESTS_DIR=third_party/snes-tests npx vitest run --reporter=dot tests/cpu/snes_cputest_vectors_full.test.ts",
+    "test:snes-vectors:max": "CPU_VECTORS_LIMIT=0 CPU_VECTORS_MODE=full SNES_TESTS_DIR=third_party/snes-tests npx vitest run --reporter=dot tests/cpu/snes_cputest_vectors_full.test.ts",
+    "test:apu": "vitest run --reporter=dot tests/apu",
+    "test:spc-vectors": "SNES_TESTS_DIR=third_party/snes-tests vitest run --reporter=dot tests/apu/spc700_vectors.test.ts",
+    "test:spc-vectors:full": "SPC_VECTORS_LIMIT=0 SNES_TESTS_DIR=third_party/snes-tests vitest run --reporter=dot tests/apu/spc700_vectors.test.ts",
+    "spc:render": "tsx scripts/spc_to_wav.ts"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^7.18.0",

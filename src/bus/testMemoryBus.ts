@@ -21,7 +21,16 @@ export class TestMemoryBus implements IMemoryBus {
   }
 
   write8(addr: number, value: Byte): void {
-    this.mem[addr & 0xffffff] = value & 0xff;
+    const a = addr & 0xffffff;
+    this.mem[a] = value & 0xff;
+    try {
+      // @ts-ignore
+      const dbg = (globalThis as any).process?.env?.CPU_DEBUG === '1';
+      if (dbg && ((a & 0xffff) === 0x01ff || (a & 0xffff) === 0x0100)) {
+        // eslint-disable-next-line no-console
+        console.log(`[BUS] W ${((a>>>16)&0xff).toString(16).padStart(2,'0')}:${(a&0xffff).toString(16).padStart(4,'0')} <= ${((value)&0xff).toString(16).padStart(2,'0')}`);
+      }
+    } catch { /* noop */ }
   }
 
   write16(addr: number, value: Word): void {

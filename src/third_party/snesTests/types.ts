@@ -53,11 +53,11 @@ export interface CpuVector {
   };
   memInit: { addr24: number; val: number }[];  // initial memory writes
   expected: {                                   // expected CPU state after executing the instruction
-    A: number;
+    A?: number;            // Only assert when provided by vector
     X?: number;
     Y?: number;
-    P: number;  // 8-bit
-    E: number;  // 0|1
+    P?: number;            // Only assert when provided by vector
+    E?: number;            // Expected E is rarely provided; treat as optional
     S?: number;
     D?: number;
     DBR?: number;
@@ -67,7 +67,7 @@ export interface CpuVector {
   note?: string;                                // optional note line from tests.txt
 }
 
-export const Flags = Flag; // re-export for convenience
+export { Flag as Flags }; // re-export for convenience
 
 export function hexToInt(s: string): number {
   return parseInt(s.replace(/^\$|^0x/i, ''), 16) >>> 0;

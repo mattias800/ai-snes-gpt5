@@ -17,7 +17,13 @@ export type Mnemonic =
   | 'clc' | 'cld' | 'cli' | 'clv' | 'sec' | 'sed' | 'sei'
   | 'tax' | 'tay' | 'txa' | 'tya' | 'tsx' | 'txs' | 'tcs' | 'tsc' | 'tcd' | 'tdc' | 'txy' | 'tyx' | 'xba' | 'xce'
   | 'nop' | 'wdm' | 'pha' | 'pla' | 'phx' | 'plx' | 'phy' | 'ply' | 'phb' | 'plb' | 'phd' | 'pld' | 'phk' | 'php' | 'plp'
-  | 'rep' | 'sep';
+  | 'rep' | 'sep'
+  // Flow control / system
+  | 'brk' | 'cop' | 'rti' | 'wai' | 'stp'
+  | 'rts' | 'rtl'
+  | 'jmp' | 'jsr' | 'jsl' | 'jml'
+  | 'bra' | 'brl' | 'beq' | 'bne' | 'bcc' | 'bcs' | 'bpl' | 'bmi' | 'bvc' | 'bvs'
+  | 'pea' | 'pei' | 'per';
 
 // Table helpers
 const memModes: AddressingMode[] = ['dp','dpX','dpY','abs','absX','absY','ind','indX','indY','longInd','longIndY','long','longX','sr','srY'];
@@ -138,6 +144,28 @@ const OP: Record<string, Partial<Record<AddressingMode, number>>> = {
 
   // REP/SEP
   rep: { imm:0xC2 }, sep: { imm:0xE2 },
+
+  // Flow/system
+  brk: { impl:0x00 }, cop: { impl:0x02 }, rti: { impl:0x40 }, wai: { impl:0xCB }, stp: { impl:0xDB },
+  rts: { impl:0x60 }, rtl: { impl:0x6B },
+
+  // Jumps and calls
+  jmp: { abs:0x4C, indAbs:0x6C, absXInd:0x7C },
+  jsr: { abs:0x20, absXInd:0xFC },
+  jsl: { long:0x22 },
+  jml: { long:0x5C, longAbs:0xDC },
+
+  // Branches
+  bra: { rel8:0x80 }, brl: { rel16:0x82 },
+  beq: { rel8:0xF0 }, bne: { rel8:0xD0 },
+  bcc: { rel8:0x90 }, bcs: { rel8:0xB0 },
+  bpl: { rel8:0x10 }, bmi: { rel8:0x30 },
+  bvc: { rel8:0x50 }, bvs: { rel8:0x70 },
+
+  // PEA/PEI/PER
+  pea: { abs:0xF4, imm:0xF4 },
+  pei: { ind:0xD4 },
+  per: { rel16:0x62 },
 };
 
 export function assemble(vec: CpuVector, cpuWidth: { m8: boolean; x8: boolean; e: boolean }): Uint8Array {
@@ -155,6 +183,7 @@ export function assemble(vec: CpuVector, cpuWidth: { m8: boolean; x8: boolean; e
     if (['adc','and','eor','ora','sbc','lda','bit','cmp'].includes(op)) width = cpuWidth.m8 ? 1 : 2;
     else if (['ldx','ldy','cpx','cpy'].includes(op)) width = cpuWidth.x8 ? 1 : 2;
     else if (['rep','sep','wdm'].includes(op)) width = 1;
+    else if (['pea'].includes(op)) width = 2; // PEA uses a 16-bit immediate (vector may encode as #$ or $)
     else width = 1; // default safe
   } else if (vec.mode === 'long') width = 3;
 

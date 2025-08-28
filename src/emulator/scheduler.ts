@@ -5,6 +5,7 @@ export type CpuErrorMode = 'ignore' | 'throw' | 'record';
 export interface SchedulerOptions {
   instrPerScanline?: number;
   onCpuError?: CpuErrorMode;
+  traceEveryInstr?: number; // if >0, log CPU state every N instructions
 }
 
 // Very simple deterministic scheduler for tests: not cycle accurate.
@@ -16,10 +17,13 @@ export class Scheduler {
   public lastCpuError: unknown | undefined;
   // Ensure we fire NMI only once per frame at VBlank start
   private nmiFiredThisFrame = false;
+  private traceEveryInstr = 0;
+  private execCount = 0;
 
   constructor(private emu: Emulator, instrPerScanline = 100, opts: SchedulerOptions = {}) {
     this.instrPerScanline = opts.instrPerScanline ?? instrPerScanline;
     this.onCpuError = opts.onCpuError ?? 'ignore';
+    this.traceEveryInstr = Math.max(0, opts.traceEveryInstr ?? 0) | 0;
   }
 
   stepScanline(): void {
@@ -35,6 +39,14 @@ export class Scheduler {
     for (let i = 0; i < visibleInstr; i++) {
       try {
         this.emu.stepInstruction();
+        this.execCount++;
+        if (this.traceEveryInstr > 0 && (this.execCount % this.traceEveryInstr) === 0) {
+          const s = (this.emu.cpu as any).state ?? {};
+          const pc = ` ${((s.PBR ?? 0) & 0xff).toString(16).padStart(2,'0')}:${((s.PC ?? 0) & 0xffff).toString(16).padStart(4,'0')}`;
+          const reg = `P=${((s.P ?? 0) & 0xff).toString(16).padStart(2,'0')} A=${((s.A ?? 0) & 0xffff).toString(16).padStart(4,'0')} X=${((s.X ?? 0) & 0xffff).toString(16).padStart(4,'0')} Y=${((s.Y ?? 0) & 0xffff).toString(16).padStart(4,'0')} DBR=${((s.DBR ?? 0) & 0xff).toString(16).padStart(2,'0')} E=${(s.E ? '1' : '0')}`;
+          // eslint-disable-next-line no-console
+          console.log(`[TRACE]${pc} ${reg}`);
+        }
       } catch (e) {
         this.lastCpuError = e;
         if (this.onCpuError === 'throw') throw e;
@@ -49,6 +61,14 @@ export class Scheduler {
       for (let i = 0; i < hblankInstr; i++) {
         try {
           this.emu.stepInstruction();
+          this.execCount++;
+          if (this.traceEveryInstr > 0 && (this.execCount % this.traceEveryInstr) === 0) {
+            const s = (this.emu.cpu as any).state ?? {};
+            const pc = ` ${((s.PBR ?? 0) & 0xff).toString(16).padStart(2,'0')}:${((s.PC ?? 0) & 0xffff).toString(16).padStart(4,'0')}`;
+            const reg = `P=${((s.P ?? 0) & 0xff).toString(16).padStart(2,'0')} A=${((s.A ?? 0) & 0xffff).toString(16).padStart(4,'0')} X=${((s.X ?? 0) & 0xffff).toString(16).padStart(4,'0')} Y=${((s.Y ?? 0) & 0xffff).toString(16).padStart(4,'0')} DBR=${((s.DBR ?? 0) & 0xff).toString(16).padStart(2,'0')} E=${(s.E ? '1' : '0')}`;
+            // eslint-disable-next-line no-console
+            console.log(`[TRACE]${pc} ${reg}`);
+          }
         } catch (e) {
           this.lastCpuError = e;
           if (this.onCpuError === 'throw') throw e;
@@ -62,6 +82,12 @@ export class Scheduler {
 
     // Advance PPU timing one scanline
     ppu.endScanline();
+
+    // Advance APU stub per scanline if available
+    const busAny = this.emu.bus as any;
+    if (typeof busAny.stepApuScanline === 'function') {
+      busAny.stepApuScanline();
+    }
 
     // Detect VBlank start transition (223 -> 224) and pulse NMI once per frame
     if (prevScanline === 223 && ppu.scanline === 224 && this.emu.bus.isNMIEnabled && this.emu.bus.isNMIEnabled()) {

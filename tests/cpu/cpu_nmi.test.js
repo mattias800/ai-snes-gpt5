@@ -6,13 +6,13 @@ function setReset(bus, addr) {
     bus.write8((0x00 << 16) | 0xfffd, (addr >>> 8) & 0xff);
 }
 describe('Minimal NMI handling', () => {
-    it('CPU.nmi jumps to $FFEA vector', () => {
+    it('CPU.nmi jumps to $FFFA vector in emulation mode', () => {
         const bus = new TestMemoryBus();
         const start = 0x8000;
         setReset(bus, start);
-        // NMI vector -> $4000
-        bus.write8((0x00 << 16) | 0xffea, 0x00);
-        bus.write8((0x00 << 16) | 0xffeb, 0x40);
+        // NMI vector (emulation mode) -> $4000
+        bus.write8((0x00 << 16) | 0xfffa, 0x00);
+        bus.write8((0x00 << 16) | 0xfffb, 0x40);
         const cpu = new CPU65C816(bus);
         cpu.reset();
         expect(cpu.state.PC).toBe(start);

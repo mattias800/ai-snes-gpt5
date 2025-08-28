@@ -31,32 +31,52 @@ async function main() {
   const width = Number.isFinite(Number(args.width)) ? Number(args.width) : 256;
   const height = Number.isFinite(Number(args.height)) ? Number(args.height) : 224;
   const holdStart = (args.holdStart ?? '1') !== '0';
+  const pressStartFrame = Number.isFinite(Number(args.pressStartFrame)) ? Math.max(-1, Number(args.pressStartFrame)) : (Number(process.env.SMW_PRESS_START_FRAME ?? '-1'));
   const cpuErrMode = (args.onCpuError as 'ignore'|'throw'|'record') || (process.env.SMW_CPUERR as any) || 'record';
   const debug = (args.debug ?? process.env.SMW_DEBUG ?? '0') !== '0';
   const forceUnblank = (args.forceUnblank ?? process.env.SMW_FORCE_UNBLANK ?? '0') !== '0';
   const forceEnableBG1 = (args.forceEnableBG1 ?? process.env.SMW_FORCE_BG1 ?? '0') !== '0';
-  const autoFallback = (args.autoFallback ?? process.env.SMW_AUTO_FALLBACK ?? '1') !== '0';
+  let autoFallback = (args.autoFallback ?? process.env.SMW_AUTO_FALLBACK ?? '1') !== '0';
+  const noFallbackArg = (args.noFallback ?? args['no-fallback']);
+  if (typeof noFallbackArg !== 'undefined') {
+    const nf = (noFallbackArg === '1' || noFallbackArg === 'true');
+    if (nf) autoFallback = false;
+  }
+  const logMmio = (args.logMmio ?? process.env.SMW_LOG_MMIO ?? '0') !== '0';
+  const logMmioLimit = args.logMmioLimit ?? process.env.SMW_LOG_LIMIT;
+  const logMmioFilter = args.logMmioFilter ?? process.env.SMW_LOG_FILTER;
+  const traceCpuEvery = Number.isFinite(Number(args.traceCpu)) ? Math.max(0, Number(args.traceCpu)) : (Number(process.env.SMW_TRACE_CPU ?? '0'));
 
   if (!romPath) {
     console.error('Usage: npm run screenshot -- --rom=path/to/SMW.sfc --out=./out.png [--frames=180] [--ips=200] [--width=256] [--height=224] [--holdStart=1] [--onCpuError=record|throw|ignore] [--debug=0|1] [--forceUnblank=0|1] [--forceEnableBG1=0|1]');
     process.exit(1);
   }
 
-  console.log(`[screenshot] ROM: ${romPath}  out: ${outPath}  frames: ${frames}  ips: ${ips}  size: ${width}x${height}  holdStart=${holdStart}  onCpuError=${cpuErrMode}  debug=${debug}  forceUnblank=${forceUnblank}  forceEnableBG1=${forceEnableBG1}  autoFallback=${autoFallback}`);
+  console.log(`[screenshot] ROM: ${romPath}  out: ${outPath}  frames: ${frames}  ips: ${ips}  size: ${width}x${height}  holdStart=${holdStart}  pressStartFrame=${pressStartFrame}  onCpuError=${cpuErrMode}  debug=${debug}  forceUnblank=${forceUnblank}  forceEnableBG1=${forceEnableBG1}  autoFallback=${autoFallback}  logMmio=${logMmio}  traceCpu=${traceCpuEvery}`);
+
+  // Configure optional MMIO logging via env so the bus can pick it up in constructor
+  if (logMmio) process.env.SMW_LOG_MMIO = '1';
+  if (typeof logMmioLimit !== 'undefined') process.env.SMW_LOG_LIMIT = String(logMmioLimit);
+  if (typeof logMmioFilter !== 'undefined') process.env.SMW_LOG_FILTER = String(logMmioFilter);
 
   const raw = fs.readFileSync(romPath);
   const { rom } = normaliseRom(new Uint8Array(raw));
   const header = parseHeader(rom);
-  console.log(`[screenshot] Detected mapping=${header.mapping} title=\"${header.title}\" checksum=${header.checksum.toString(16)}`);
+  console.log(`[screenshot] Detected mapping=${header.mapping} title="${header.title}" checksum=${header.checksum.toString(16)}`);
   const cart = new Cartridge({ rom, mapping: header.mapping });
   const emu = Emulator.fromCartridge(cart);
   emu.reset();
 
-  const sched = new Scheduler(emu, ips, { onCpuError: cpuErrMode });
+  const sched = new Scheduler(emu, ips, { onCpuError: cpuErrMode, traceEveryInstr: traceCpuEvery });
   if (holdStart) emu.bus.setController1State({ Start: true });
 
   try {
     for (let i = 0; i < frames; i++) {
+      // Simulate momentary Start press at a chosen frame
+      if (pressStartFrame >= 0) {
+        if (i === pressStartFrame) emu.bus.setController1State({ Start: true });
+        if (i === pressStartFrame + 1) emu.bus.setController1State({ Start: false });
+      }
       sched.stepFrame();
       if (i % 30 === 29) console.log(`[screenshot] stepped ${i + 1} frames`);
     }

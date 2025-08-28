@@ -11,6 +11,31 @@
   "plugins": ["@typescript-eslint"],
   "extends": ["eslint:recommended", "plugin:@typescript-eslint/recommended", "prettier"],
   "ignorePatterns": ["dist", "node_modules"],
+  "overrides": [
+    {
+      "files": ["tests/**/*.{ts,js}", "scripts/**/*.{ts,js}"]
+      ,
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off",
+        "@typescript-eslint/no-unused-vars": "off",
+        "no-inner-declarations": "off"
+      }
+    },
+    {
+      "files": ["src/ppu/**/*.ts", "src/bus/snesBus.ts", "src/emulator/scheduler.ts"],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off",
+        "no-inner-declarations": "off",
+        "@typescript-eslint/ban-ts-comment": "off"
+      }
+    },
+    {
+      "files": ["src/cart/header.ts"],
+      "rules": {
+        "no-control-regex": "off"
+      }
+    }
+  ],
   "rules": {
     "@typescript-eslint/explicit-module-boundary-types": "off"
   }

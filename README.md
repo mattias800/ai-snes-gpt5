@@ -3,6 +3,7 @@
 A TypeScript SNES emulator developed with zero manual testing until acceptance criteria signal readiness to run Super Mario World.
 
 - See docs/EMULATOR_PLAN.md for the roadmap and testing strategy.
+- Optional SPC700 core: set APU_SPC700_CORE=1 (or APU_SPC700_MODE=core) together with SMW_SPC700=1 to enable the new APUDevice under the existing SPC700 wrapper. Without these env flags, the legacy handshake shim remains active.
 - This repository does not and will not include copyrighted ROMs.
 
 ## PPU color math and windowing (simplified model)
@@ -32,4 +33,19 @@ Notes:
 - Fixed color (COLDATA $2132) is used as subscreen when CGWSEL bit2 is set and no eligible subscreen pixel is present (or subscreen is masked by window gating).
 
 This behavior is validated by an extensive Vitest suite. See tests/ppu/*window* and *color_math* for coverage.
+
+## Optional third-party test ROMs
+
+This repo bundles upstream community SNES test ROMs in a zip for convenience. They are not executed by default.
+
+- To extract and enable related smoke tests locally:
+
+  npm run setup:snes-tests
+
+- Then run the focused smoke tests:
+
+  npx vitest run --reporter=dot tests/emulator/snes_tests_smoke.test.ts
+  npx vitest run --reporter=dot tests/cpu/cputest_vectors_smoke.test.ts
+
+In CI, these smoke tests run in a separate job but remain lightweight and non-authoritative.
 
