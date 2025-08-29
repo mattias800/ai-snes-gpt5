@@ -19,6 +19,7 @@ const statusEl = $("#status");
 const logEl = $("#log");
 const resetBtn = $("#resetBtn");
 const pauseBtn = $("#pauseBtn");
+const saveBtn = $("#saveBtn");
 const canvas = $("#screen") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d", { alpha: false })!;
 
@@ -156,6 +157,7 @@ async function bootFromRomBytes(bytes: Uint8Array) {
   rafId = requestAnimationFrame(frame);
   resetBtn.toggleAttribute("disabled", false);
   pauseBtn.toggleAttribute("disabled", false);
+  saveBtn.toggleAttribute("disabled", false);
 }
 
 async function loadFile(f: File) {
@@ -180,6 +182,45 @@ pauseBtn.addEventListener("click", () => {
   if (!emu) return;
   if (running) { stopLoop(); pauseBtn.textContent = "Resume"; }
   else { running = true; pauseBtn.textContent = "Pause"; rafId = requestAnimationFrame(frame); }
+});
+
+function timestampName(): string {
+  const d = new Date();
+  const pad = (n: number, w = 2) => n.toString().padStart(w, "0");
+  const y = d.getFullYear();
+  const m = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const h = pad(d.getHours());
+  const min = pad(d.getMinutes());
+  const s = pad(d.getSeconds());
+  return `snes_frame_${y}${m}${day}_${h}${min}${s}.png`;
+}
+
+saveBtn.addEventListener("click", () => {
+  // Export the current canvas contents as a native-resolution PNG (256x224)
+  const name = timestampName();
+  if (canvas.toBlob) {
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }, "image/png");
+  } else {
+    // Fallback for older browsers
+    const dataUrl = canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
 });
 
 scaleInput.addEventListener("change", setCanvasScale);
