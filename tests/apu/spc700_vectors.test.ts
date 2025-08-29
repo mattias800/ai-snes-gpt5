@@ -5,7 +5,7 @@ import { APUDevice } from '../../src/apu/apu';
 import { parseSpcVectors } from '../../src/third_party/snesTests/parseSpcVectors';
 import { assembleOne, AssembleUnsupportedError } from '../../src/third_party/snesTests/assembleSpc700';
 
-const ROOT = process.env.SNES_TESTS_DIR || path.resolve('third_party/snes-tests');
+const ROOT = process.env.SNES_TESTS_DIR || path.resolve('test-roms/snes-tests');
 const LIST = path.join(ROOT, 'spctest', 'tests.txt');
 
 const runIf = (LIST && fs.existsSync(LIST)) ? describe : describe.skip;

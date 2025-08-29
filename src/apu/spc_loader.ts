@@ -13,6 +13,17 @@ export function loadSpcIntoApu(apu: APUDevice, buf: Buffer): void {
   for (let i = 0; i < 0x10000; i++) {
     apu.aram[i] = buf[ramStart + i] & 0xff;
   }
+
+  // Restore IO registers that aren't backed by ARAM memory in APUDevice
+  try {
+    const f1 = buf[ramStart + 0xf1] & 0xff; // control
+    const t0 = buf[ramStart + 0xfa] & 0xff;
+    const t1 = buf[ramStart + 0xfb] & 0xff;
+    const t2 = buf[ramStart + 0xfc] & 0xff;
+    (apu as any).setIoFromSnapshot?.(f1, t0, t1, t2);
+  } catch {
+    // ignore if not available
+  }
   // Load DSP regs in two passes: first everything except KOF(0x5C)/KON(0x4C),
   // then apply KOF and KON to avoid keying on before voice params are set.
   const dspBase = 0x10100;
@@ -31,6 +42,13 @@ export function loadSpcIntoApu(apu: APUDevice, buf: Buffer): void {
   // Apply KOF then KON as captured
   dspWriteAddr(0x5c); dspWriteData(kof);
   dspWriteAddr(0x4c); dspWriteData(kon);
+
+  // Ensure FLG reset/mute are cleared post-load so output is audible
+  // Preserve other FLG bits from snapshot (e.g., echo write disable)
+  const flgOrig = buf[dspBase + 0x6c] & 0xff;
+  const flg = flgOrig & ~0xc0; // clear bit7 RESET and bit6 MUTE
+  dspWriteAddr(0x6c); dspWriteData(flg);
+
   // CPU registers (best-effort)
   try {
     const pc = (buf[0x26] << 8) | buf[0x25];

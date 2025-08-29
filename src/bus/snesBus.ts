@@ -256,8 +256,13 @@ export class SNESBus implements IMemoryBus {
 
     // $4212 HVBJOY: VBlank status on bit7, HBlank status on bit6
     if (off === 0x4212) {
-      const vblank = this.ppu.scanline >= 224; // simple model: lines >=224 are VBlank
-      const hblank = this.ppu.hblank;
+      let vblank = this.ppu.scanline >= 224; // default coarse model
+      let hblank = this.ppu.hblank;
+      try {
+        const ppuAny: any = this.ppu as any;
+        if (typeof ppuAny.isVBlank === 'function') vblank = !!ppuAny.isVBlank();
+        if (typeof ppuAny.isHBlank === 'function') hblank = !!ppuAny.isHBlank();
+      } catch { /* noop */ }
       const v = (vblank ? 0x80 : 0x00) | (hblank ? 0x40 : 0x00);
       if (shouldLog) {
         // eslint-disable-next-line no-console

@@ -135,8 +135,9 @@ export class APUDevice {
         const inc1 = this.t1.tick(budget) | 0;
         const inc2 = this.t2.tick(budget) | 0;
         if ((inc0 | inc1 | inc2) !== 0) {
-          // Timer activity can be used to wake the SMP from SLEEP
+          // Timer activity can be used to wake the SMP from low-power states
           this.smp.wakeFromSleep();
+          (this.smp as any).wakeFromStop?.();
         }
         // All budget consumed by timer ticking; exit early
         this.smp.lastCycles = 0;
@@ -150,8 +151,9 @@ export class APUDevice {
       const inc1 = this.t1.tick(tickn) | 0;
       const inc2 = this.t2.tick(tickn) | 0;
       if ((inc0 | inc1 | inc2) !== 0) {
-        // Timer activity can be used to wake the SMP from SLEEP
+        // Timer activity can be used to wake the SMP from low-power states
         this.smp.wakeFromSleep();
+        (this.smp as any).wakeFromStop?.();
       }
       budget -= tickn;
     }
@@ -160,5 +162,24 @@ export class APUDevice {
   // Produce one stereo sample using the DSP
   mixSample(): [number, number] {
     return this.dsp.mixSample();
+  }
+
+  setMixGain(g: number): void {
+    (this.dsp as any).setMixGain?.(g);
+  }
+
+  // Debug helpers
+  setVoiceMask(mask: number): void { (this.dsp as any).setVoiceMask?.(mask); }
+  beginMixTrace(maxFrames: number): void { (this.dsp as any).beginMixTrace?.(maxFrames); }
+  endMixTrace(): void { (this.dsp as any).endMixTrace?.(); }
+  getMixTrace(): any[] { return (this.dsp as any).getMixTrace?.() || []; }
+
+  // Initialize IO registers ($F1 control and timer targets) from an SPC snapshot
+  setIoFromSnapshot(f1: number, t0Target: number, t1Target: number, t2Target: number): void {
+    // Set timer targets first, then control to apply enables/resets
+    this.t0.setTarget(t0Target & 0xff);
+    this.t1.setTarget(t1Target & 0xff);
+    this.t2.setTarget(t2Target & 0xff);
+    this.writeControl(f1 & 0xff);
   }
 }

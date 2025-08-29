@@ -11,7 +11,7 @@ function read8(bus: TestMemoryBus, bank: number, addr16: number) {
 }
 
 describe('CPU65C816 control/system ops smoke', () => {
-  it('PEA pushes low then high, decrements S by 2', () => {
+  it('PEA pushes high then low, decrements S by 2', () => {
     const bus = new TestMemoryBus();
     const cpu = new CPU65C816(bus);
     cpu.state.E = true; // emulation stack page
@@ -22,13 +22,13 @@ describe('CPU65C816 control/system ops smoke', () => {
     write8(bus, 0x00, 0x8001, 0x34);
     write8(bus, 0x00, 0x8002, 0x12);
     cpu.stepInstruction();
-    // low at 0x01ff, high at 0x01fe
-    expect(read8(bus, 0x00, 0x01ff)).toBe(0x34);
-    expect(read8(bus, 0x00, 0x01fe)).toBe(0x12);
+    // high at 0x01ff, low at 0x01fe
+    expect(read8(bus, 0x00, 0x01ff)).toBe(0x12);
+    expect(read8(bus, 0x00, 0x01fe)).toBe(0x34);
     expect(cpu.state.S & 0xffff).toBe(0x01fd);
   });
 
-  it('PEI (dp) pushes target low then high from D+dp', () => {
+  it('PEI (dp) pushes target high then low from D+dp', () => {
     const bus = new TestMemoryBus();
     const cpu = new CPU65C816(bus);
     cpu.state.E = true; cpu.state.PC = 0x8000; cpu.state.PBR = 0x00; cpu.state.S = 0x01ff;
@@ -40,12 +40,12 @@ describe('CPU65C816 control/system ops smoke', () => {
     write8(bus, 0x00, 0x8000, 0xd4);
     write8(bus, 0x00, 0x8001, 0x80);
     cpu.stepInstruction();
-    expect(read8(bus, 0x00, 0x01ff)).toBe(0x78);
-    expect(read8(bus, 0x00, 0x01fe)).toBe(0x56);
+    expect(read8(bus, 0x00, 0x01ff)).toBe(0x56);
+    expect(read8(bus, 0x00, 0x01fe)).toBe(0x78);
     expect(cpu.state.S & 0xffff).toBe(0x01fd);
   });
 
-  it('PER pushes PC-relative target (low then high)', () => {
+  it('PER pushes PC-relative target (high then low)', () => {
     const bus = new TestMemoryBus();
     const cpu = new CPU65C816(bus);
     cpu.state.E = true; cpu.state.PC = 0x8000; cpu.state.PBR = 0x00; cpu.state.S = 0x01ff;
@@ -54,8 +54,8 @@ describe('CPU65C816 control/system ops smoke', () => {
     write8(bus, 0x00, 0x8001, 0x04);
     write8(bus, 0x00, 0x8002, 0x00);
     cpu.stepInstruction();
-    expect(read8(bus, 0x00, 0x01ff)).toBe(0x07);
-    expect(read8(bus, 0x00, 0x01fe)).toBe(0x80);
+    expect(read8(bus, 0x00, 0x01ff)).toBe(0x80);
+    expect(read8(bus, 0x00, 0x01fe)).toBe(0x07);
     expect(cpu.state.S & 0xffff).toBe(0x01fd);
   });
 

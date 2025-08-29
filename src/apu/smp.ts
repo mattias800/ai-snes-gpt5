@@ -33,8 +33,22 @@ export class SMP {
 
   constructor(private bus: SMPBus) {}
 
-  // External wake for SLEEP
+  // Opcode tracing for diagnostics
+  private traceOpcodes = false;
+  private unknownOpCounts: Record<string, number> = {};
+  enableOpcodeTrace(on: boolean): void { this.traceOpcodes = !!on; this.unknownOpCounts = {}; }
+  getUnknownOpcodeStats(): { op: number, count: number }[] {
+    const out: { op:number,count:number }[] = [];
+    for (const k of Object.keys(this.unknownOpCounts)) {
+      out.push({ op: parseInt(k, 10), count: this.unknownOpCounts[k]! });
+    }
+    out.sort((a,b)=>b.count-a.count);
+    return out;
+  }
+
+  // External wake for SLEEP/STOP
   public wakeFromSleep(): void { this.sleeping = false; }
+  public wakeFromStop(): void { this.stopped = false; }
   // Query low-power state for scheduler optimizations
   public isSleeping(): boolean { return this.sleeping; }
   public isStopped(): boolean { return this.stopped; }
@@ -1514,6 +1528,14 @@ export class SMP {
         return 5;
       }
       case 0x7f: { // RETI (pop PSW, then PC)
+        // Debug trace for RETI in vector repros
+        try {
+          const sp0 = this.SP & 0xff;
+          const pswAddr = 0x0100 | ((sp0 + 1) & 0xff);
+          const pswMem = this.read8(pswAddr) & 0xff;
+          // eslint-disable-next-line no-console
+          console.log(`[SMP.RETI] SP=${sp0.toString(16)} PSWmem@${pswAddr.toString(16)}=${pswMem.toString(16)}`);
+        } catch {}
         this.PSW = this.pop8() & 0xff;
         const lo = this.pop8() & 0xff;
         const hi = this.pop8() & 0xff;
@@ -1807,7 +1829,11 @@ export class SMP {
       }
 
       default:
-        // For now, treat unknown opcodes as NOP to keep tests deterministic.
+        if (this.traceOpcodes) {
+          const key = String(op);
+          this.unknownOpCounts[key] = (this.unknownOpCounts[key] || 0) + 1;
+        }
+        // Treat unknown opcodes as NOP to keep running
         return 2;
     }
   }

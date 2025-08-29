@@ -23,6 +23,30 @@ export class SDSP {
   private mute = false; // FLG bit 6
   private echoWriteDisable = false; // FLG bit 5
 
+  // Debug snapshot of last mix
+  public debug: { dryL:number; dryR:number; echoInL:number; echoInR:number; firL:number; firR:number; outL:number; outR:number; mvolL:number; mvolR:number; evolL:number; evolR:number } | null = null;
+
+  // Output scaling (applied to mix just before final clamp)
+  private mixGain = 1.0;
+  setMixGain(g: number) { this.mixGain = Math.max(0.0001, g); }
+
+  // Debug envelope tracing
+  private traceEnv = false;
+  private envTrace: string[] = [];
+  setTraceEnvelope(enabled: boolean) { this.traceEnv = !!enabled; this.envTrace = []; }
+  getEnvelopeTrace(): string[] { return this.envTrace.slice(); }
+
+  // Voice mask and mix tracing
+  private voiceMask = 0xff;
+  setVoiceMask(mask: number) { this.voiceMask = mask & 0xff; }
+
+  private traceMix = false;
+  private traceMaxFrames = 0;
+  private traceFrames: any[] = [];
+  beginMixTrace(maxFrames: number) { this.traceMix = true; this.traceMaxFrames = Math.max(0, maxFrames|0); this.traceFrames = []; }
+  endMixTrace() { this.traceMix = false; }
+  getMixTrace(): any[] { return this.traceFrames.slice(); }
+
   attachAram(aram: Uint8Array) { this.aram = aram; }
 
   reset(): void {
@@ -90,36 +114,36 @@ export class SDSP {
         break;
     }
 
-    // Per-voice regs (patterned by 0x10 stride)
-    const vIndex = a & 0x0f;
-    const group = a & 0xf0; // 0x00,0x10,0x20,...,0x70
-    if (vIndex < 8) {
-      const vstate = this.voices[vIndex];
-      switch (group) {
+    // Per-voice regs (offset within voice block is low nibble; voice index is high nibble)
+    const off = a & 0x0f; // 0x00..0x0f
+    if (off <= 0x07) {
+      const voice = (a >>> 4) & 0x07; // 0..7
+      const vstate = this.voices[voice];
+      switch (off) {
         case 0x00: // VOL(L)
-          vstate.volL = (val << 24) >> 24; // sign-extend 8-bit
+          vstate.volL = (val << 24) >> 24; // signed 8-bit
           break;
-        case 0x10: // VOL(R)
+        case 0x01: // VOL(R)
           vstate.volR = (val << 24) >> 24;
           break;
-        case 0x20: // PITCHL
+        case 0x02: // PITCHL
           vstate.pitch = (vstate.pitch & 0x3f00) | (val & 0xff);
           break;
-        case 0x30: // PITCHH (14-bit)
+        case 0x03: // PITCHH (14-bit)
           vstate.pitch = ((val & 0x3f) << 8) | (vstate.pitch & 0xff);
           if (vstate.pitch < 0) vstate.pitch = 0;
           break;
-        case 0x40: // SRCN
+        case 0x04: // SRCN
           vstate.srcn = val & 0xff;
           break;
-        case 0x50: // ADSR1 (ignored in this minimal mix)
-          vstate.adsr1 = val;
+        case 0x05: // ADSR1
+          vstate.adsr1 = val & 0xff;
           break;
-        case 0x60: // ADSR2 (ignored)
-          vstate.adsr2 = val;
+        case 0x06: // ADSR2
+          vstate.adsr2 = val & 0xff;
           break;
-        case 0x70: // GAIN (ignored)
-          vstate.gain = val;
+        case 0x07: // GAIN
+          vstate.gain = val & 0xff;
           break;
       }
     }
@@ -163,7 +187,10 @@ export class SDSP {
     const evolR = (this.regs[0x3c] << 24) >> 24;
     const eon = this.eonMask & 0xff;
 
+    const frameTraceVoices: any[] = this.traceMix ? [] : null as any;
+
     for (let i = 0; i < 8; i++) {
+      if (((this.voiceMask >>> i) & 1) === 0) continue;
       const v = this.voices[i];
       if (!v.active || !this.aram) continue;
 
@@ -193,33 +220,33 @@ export class SDSP {
       const w0 = g(1 - f);
       const wsum = w3 + w2 + w1 + w0 || 1;
       const sApprox = (v.h3 * w3 + v.h2 * w2 + v.h1 * w1 + v.h0 * w0) / wsum;
-      let s = sApprox | 0;
+      let s = sApprox; // keep high precision here
 
       // Envelope
-      s = (s * this.updateEnvelope(v)) | 0;
+      const envVal = this.updateEnvelope(v);
+      s = s * envVal;
 
-      // Apply per-voice volumes (signed)
+      // Apply per-voice volumes (signed), keep as float until final clamp
       const vl = (s * v.volL) / 128;
       const vr = (s * v.volR) / 128;
-      const pl = (vl / 6) | 0; // pre-attenuate to avoid clipping
-      const pr = (vr / 6) | 0;
 
-      dryL += pl;
-      dryR += pr;
-      if (eon & (1 << i)) { echoInL += pl; echoInR += pr; }
+      if (frameTraceVoices) frameTraceVoices.push({ i, sApprox, env: envVal, s, volL: v.volL, volR: v.volR, vl, vr });
+
+      dryL += vl;
+      dryR += vr;
+      if (eon & (1 << i)) { echoInL += vl; echoInR += vr; }
     }
 
     // Echo FIR filter of previous echo samples from ARAM
     let firL = 0, firR = 0;
     if (this.aram && this.echoFrames > 0) {
-      for (let t = 0; t < 8; t++) {
-        const coeff = (this.regs[(0x0f + (t << 4)) & 0x7f] << 24) >> 24; // signed 8-bit
-        const idxFrame = (this.echoPosFrame - t + this.echoFrames) % this.echoFrames;
-        const [eL, eR] = this.readEchoLRAtFrame(idxFrame);
-        firL += (eL * coeff) / 128;
-        firR += (eR * coeff) / 128;
-      }
-      firL |= 0; firR |= 0;
+    for (let t = 0; t < 8; t++) {
+      const coeff = (this.regs[(0x0f + (t << 4)) & 0x7f] << 24) >> 24; // signed 8-bit
+      const idxFrame = (this.echoPosFrame - t + this.echoFrames) % this.echoFrames;
+      const [eL, eR] = this.readEchoLRAtFrame(idxFrame);
+      firL += (eL * coeff) / 128;
+      firR += (eR * coeff) / 128;
+    }
     }
 
     // Output = dry*MVOL + echo*EVOL
@@ -231,17 +258,26 @@ export class SDSP {
     let wL = echoInL + ((firL * efb) / 128);
     let wR = echoInR + ((firR * efb) / 128);
     // Clamp write
-    wL = Math.max(-32768, Math.min(32767, wL | 0));
-    wR = Math.max(-32768, Math.min(32767, wR | 0));
+    wL = Math.max(-32768, Math.min(32767, Math.round(wL)));
+    wR = Math.max(-32768, Math.min(32767, Math.round(wR)));
 
     if (this.aram && !this.echoWriteDisable) {
-      this.writeEchoLRAtFrame(this.echoPosFrame, wL | 0, wR | 0);
+      this.writeEchoLRAtFrame(this.echoPosFrame, wL, wR);
     }
     this.echoPosFrame = (this.echoPosFrame + 1) % Math.max(1, this.echoFrames);
 
-    // Clamp to 16-bit final output
-    const l = Math.max(-32768, Math.min(32767, outL | 0));
-    const r = Math.max(-32768, Math.min(32767, outR | 0));
+    // Apply master mix gain then clamp to 16-bit final output
+    outL *= this.mixGain;
+    outR *= this.mixGain;
+    const l = Math.max(-32768, Math.min(32767, Math.round(outL)));
+    const r = Math.max(-32768, Math.min(32767, Math.round(outR)));
+
+    this.debug = { dryL, dryR, echoInL, echoInR, firL, firR, outL, outR, mvolL, mvolR, evolL, evolR };
+
+    if (this.traceMix && this.traceFrames.length < this.traceMaxFrames) {
+      this.traceFrames.push({ dryL, dryR, outL, outR, voices: frameTraceVoices || [] });
+    }
+
     return [l, r];
   }
 
@@ -290,6 +326,7 @@ export class SDSP {
     // ADSR enabled?
     const adsr = (v.adsr1 & 0x80) !== 0;
     if (adsr) {
+      if (this.traceEnv && v.index === 0 && this.envTrace.length < 64) this.envTrace.push(`pre idx=${v.index} phase=${v.envPhase} env=${v.env.toFixed(6)} adsr1=${v.adsr1.toString(16)} adsr2=${v.adsr2.toString(16)}`);
       // Attack rate: bits 4..6 (0..15). Map to step per sample.
       const AR = (v.adsr1 >>> 4) & 0x0f;
       const DR = (v.adsr1) & 0x0f;
@@ -333,6 +370,7 @@ export class SDSP {
       }
     }
     if (v.env < 0) v.env = 0; if (v.env > 1) v.env = 1;
+    if (this.traceEnv && v.index === 0 && this.envTrace.length < 128) this.envTrace.push(`post idx=${v.index} phase=${v.envPhase} env=${v.env.toFixed(6)}`);
     return v.env;
   }
 
@@ -382,9 +420,9 @@ export class SDSP {
     if (v.samplesRemainingInBlock <= 0) {
       // End of block: advance pointer
       const end = (v.curHeader & 0x01) !== 0;
-      const loop = (v.curHeader & 0x02) !== 0;
       if (end) {
-        if (loop && v.loopAddr !== 0) {
+        // On END, jump to sample's loop address if provided; do not depend on header's loop bit
+        if (v.loopAddr !== 0) {
           v.curAddr = v.loopAddr & 0xffff;
         } else {
           v.active = false; // stop

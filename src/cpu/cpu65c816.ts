@@ -153,7 +153,7 @@ export class CPU65C816 {
 
   // Helpers for direct page and stack-relative pointer fetches with correct wrap semantics
   private dpBase(): Word {
-    // In emulation mode (E=1), the direct page is fixed to $0000 regardless of D register.
+    // Real 65C816 behavior: in emulation mode (E=1), DP base is fixed to $0000.
     // In native mode (E=0), D selects the direct page base.
     return (this.state.E ? 0x0000 : (this.state.D & 0xffff)) as Word;
   }
@@ -189,16 +189,38 @@ export class CPU65C816 {
     return { bank: bank as Byte, addr: (((hi << 8) | lo) & 0xffff) as Word };
   }
   private srBase(): Word {
+    // Base address of the stack page for addressing. In emulation (E=1), stack is fixed to $0100 page
+    // and only the low byte of S participates; in native mode, S is full 16-bit.
     return this.state.E ? ((0x0100 | (this.state.S & 0xff)) & 0xffff) : (this.state.S & 0xffff);
   }
+  private srAddr(off8: number): Word {
+    // Compute effective stack-relative address with correct wrap semantics:
+    // - Emulation (E=1): 00:0100 | ((S.low + off8) & 0xff)
+    // - Native    (E=0): 00:(S + off8) & 0xffff
+    if (this.state.E) {
+      const sLow = this.state.S & 0xff;
+      return ((0x0100 | ((sLow + (off8 & 0xff)) & 0xff)) & 0xffff) as Word;
+    } else {
+      return ((this.state.S + (off8 & 0xff)) & 0xffff) as Word;
+    }
+  }
   private srPtr16(sr: number): Word {
-    const base = this.srBase();
-    const off = sr & 0xff;
-    const loAddr = (base + off) & 0xffff;
-    const hiAddr = (loAddr + 1) & 0xffff; // stack-relative pointer fetch increments without 8-bit wrap
-    const lo = this.read8(0x00, loAddr as Word);
-    const hi = this.read8(0x00, hiAddr as Word);
-    return ((hi << 8) | lo) & 0xffff;
+    // Pointer fetch for (sr) addressing.
+    // Emulation mode (E=1): bytes from $0100 | ((S.low + sr) & 0xff) and $0100 | ((S.low + sr + 1) & 0xff)
+    // Native mode   (E=0): bytes from (S + sr) and (S + sr + 1), i.e., 16-bit carry from low to high pointer byte.
+    if (this.state.E) {
+      const sLow = this.state.S & 0xff;
+      const loAddr = (0x0100 | ((sLow + (sr & 0xff)) & 0xff)) & 0xffff;
+      const hiAddr = (0x0100 | ((sLow + ((sr + 1) & 0xff)) & 0xff)) & 0xffff;
+      const lo = this.read8(0x00, loAddr as Word);
+      const hi = this.read8(0x00, hiAddr as Word);
+      return ((hi << 8) | lo) & 0xffff;
+    } else {
+      const base = (this.state.S + (sr & 0xff)) & 0xffff;
+      const lo = this.read8(0x00, base as Word);
+      const hi = this.read8(0x00, ((base + 1) & 0xffff) as Word);
+      return ((hi << 8) | lo) & 0xffff;
+    }
   }
 
   // Effective address helpers for common indirect/long modes
@@ -214,14 +236,11 @@ export class CPU65C816 {
     return { bank: this.state.DBR & 0xff, addr: base as Word };
   }
 
-  // (dp),Y -> pointer in bank0 at D+dp; effective address is DBR:base + Y with 24-bit carry into bank
+  // (dp),Y -> pointer in bank0 at D+dp; effective address is DBR:base + Y (no bank carry)
   private effIndDPY(dp: number): { bank: Byte; addr: Word } {
     const base = this.dpPtr16(dp);
-    const sum24 = ((this.state.DBR & 0xff) << 16) | (base & 0xffff);
-    const indexed24 = (sum24 + (this.indexY() & 0xffff)) >>> 0;
-    const bank = (indexed24 >>> 16) & 0xff;
-    const addr = indexed24 & 0xffff;
-    return { bank: bank as Byte, addr: addr as Word };
+    const { bank, addr } = this.addIndexToAddress(this.state.DBR & 0xff, base as Word, this.indexY());
+    return { bank, addr };
   }
 
   // [dp] -> long pointer (bank:addr) from bank0 at D+dp
@@ -239,14 +258,11 @@ export class CPU65C816 {
     return { bank: effBank as Byte, addr: effAddr as Word };
   }
 
-  // (sr),Y -> pointer from stack-relative address in bank0; effective address is DBR:base + Y with 24-bit carry
+  // (sr),Y -> pointer from stack-relative address in bank0; effective address is DBR:base + Y (no bank carry)
   private effSRY(sr: number): { bank: Byte; addr: Word } {
     const base = this.srPtr16(sr);
-    const sum24 = ((this.state.DBR & 0xff) << 16) | (base & 0xffff);
-    const indexed24 = (sum24 + (this.indexY() & 0xffff)) >>> 0;
-    const bank = (indexed24 >>> 16) & 0xff;
-    const addr = indexed24 & 0xffff;
-    return { bank: bank as Byte, addr: addr as Word };
+    const { bank, addr } = this.addIndexToAddress(this.state.DBR & 0xff, base as Word, this.indexY());
+    return { bank, addr };
   }
 
   private push8(v: Byte): void {
@@ -805,8 +821,7 @@ this.dbg(`[ADC abs,Y] m8=0 DBR=$${(effBank & 0xff).toString(16).padStart(2,'0')}
       }
       case 0x63: { // ADC sr (stack relative)
         const sr = this.fetch8();
-        const base = this.srBase();
-        const eff = (base + (sr & 0xff)) & 0xffff;
+        const eff = this.srAddr(sr & 0xff);
         if (this.m8) {
           const m = this.read8(0x00, eff as Word);
           this.adc(m);
@@ -857,7 +872,7 @@ this.dbg(`[ADC abs,Y] m8=0 DBR=$${(effBank & 0xff).toString(16).padStart(2,'0')}
           const m = this.read8(bank, addr);
           this.adc(m);
         } else {
-          const m = this.read16(bank, addr);
+          const m = this.read16Cross(bank, addr);
           this.adc(m);
         }
         break;
@@ -876,7 +891,7 @@ this.dbg(`[ADC abs,Y] m8=0 DBR=$${(effBank & 0xff).toString(16).padStart(2,'0')}
           const m = this.read8(effBank, effAddr);
           this.adc(m);
         } else {
-          const m = this.read16(effBank, effAddr);
+          const m = this.read16Cross(effBank, effAddr);
           this.adc(m);
         }
         break;
@@ -889,7 +904,7 @@ this.dbg(`[ADC abs,Y] m8=0 DBR=$${(effBank & 0xff).toString(16).padStart(2,'0')}
           this.dbg(`[ADC [dp]] m8=1 dp=$${(dp&0xff).toString(16).padStart(2,'0')} -> (${bank.toString(16).padStart(2,'0')}:${addr.toString(16).padStart(4,'0')}) A_pre=$${(this.state.A & 0xff).toString(16).padStart(2,'0')} P=$${(this.state.P & 0xff).toString(16).padStart(2,'0')} m=$${m.toString(16).padStart(2,'0')}`);
           this.adc(m);
         } else {
-          const m = this.read16(bank, addr);
+          const m = this.read16Cross(bank, addr);
           this.dbg(`[ADC [dp]] m8=0 dp=$${(dp&0xff).toString(16).padStart(2,'0')} -> (${bank.toString(16).padStart(2,'0')}:${addr.toString(16).padStart(4,'0')}) A_pre=$${(this.state.A & 0xffff).toString(16).padStart(4,'0')} P=$${(this.state.P & 0xff).toString(16).padStart(2,'0')} m16=$${m.toString(16).padStart(4,'0')}`);
           this.adc(m);
         }
@@ -903,8 +918,8 @@ this.dbg(`[ADC abs,Y] m8=0 DBR=$${(effBank & 0xff).toString(16).padStart(2,'0')}
           this.dbg(`[ADC [dp],Y] m8=1 dp=$${(dp&0xff).toString(16).padStart(2,'0')} -> (${bank.toString(16).padStart(2,'0')}:${addr.toString(16).padStart(4,'0')}) A_pre=$${(this.state.A & 0xff).toString(16).padStart(2,'0')} P=$${(this.state.P & 0xff).toString(16).padStart(2,'0')} m=$${m.toString(16).padStart(2,'0')}`);
           this.adc(m);
         } else {
-          const m = this.read16(bank, addr);
-          this.dbg(`[EOR [dp],Y] m8=0 dp=$${(dp&0xff).toString(16).padStart(2,'0')} -> (${bank.toString(16).padStart(2,'0')}:${addr.toString(16).padStart(4,'0')}) A_pre=$${(this.state.A & 0xffff).toString(16).padStart(4,'0')} P=$${(this.state.P & 0xff).toString(16).padStart(2,'0')} m16=$${m.toString(16).padStart(4,'0')}`);
+          const m = this.read16Cross(bank, addr);
+          this.dbg(`[ADC [dp],Y] m8=0 dp=$${(dp&0xff).toString(16).padStart(2,'0')} -> (${bank.toString(16).padStart(2,'0')}:${addr.toString(16).padStart(4,'0')}) A_pre=$${(this.state.A & 0xffff).toString(16).padStart(4,'0')} P=$${(this.state.P & 0xff).toString(16).padStart(2,'0')} m16=$${m.toString(16).padStart(4,'0')}`);
           this.adc(m);
         }
         break;
@@ -1012,8 +1027,7 @@ this.dbg(`[ADC abs,Y] m8=0 DBR=$${(effBank & 0xff).toString(16).padStart(2,'0')}
       }
       case 0xe3: { // SBC sr
         const sr = this.fetch8();
-        const base = this.srBase();
-        const eff = (base + (sr & 0xff)) & 0xffff;
+        const eff = this.srAddr(sr & 0xff);
         if (this.m8) {
           const m = this.read8(0x00, eff as Word);
           this.sbc(m);
@@ -1056,7 +1070,7 @@ this.dbg(`[ADC abs,Y] m8=0 DBR=$${(effBank & 0xff).toString(16).padStart(2,'0')}
           const m = this.read8(bank, addr);
           this.sbc(m);
         } else {
-          const m = this.read16(bank, addr);
+          const m = this.read16Cross(bank, addr);
           this.sbc(m);
         }
         break;
@@ -1075,7 +1089,7 @@ this.dbg(`[ADC abs,Y] m8=0 DBR=$${(effBank & 0xff).toString(16).padStart(2,'0')}
           const m = this.read8(effBank, effAddr);
           this.sbc(m);
         } else {
-          const m = this.read16(effBank, effAddr);
+          const m = this.read16Cross(effBank, effAddr);
           this.sbc(m);
         }
         break;
@@ -1091,7 +1105,7 @@ this.dbg(`[ADC abs,Y] m8=0 DBR=$${(effBank & 0xff).toString(16).padStart(2,'0')}
           const m = this.read8(bank, addr);
           this.sbc(m);
         } else {
-          const m = this.read16(bank, addr);
+          const m = this.read16Cross(bank, addr);
           this.sbc(m);
         }
         break;
@@ -1103,7 +1117,7 @@ this.dbg(`[ADC abs,Y] m8=0 DBR=$${(effBank & 0xff).toString(16).padStart(2,'0')}
           const m = this.read8(bank, addr);
           this.sbc(m);
         } else {
-          const m = this.read16(bank, addr);
+          const m = this.read16Cross(bank, addr);
           this.sbc(m);
         }
         break;
@@ -2049,7 +2063,7 @@ this.write16(effBank, eff, m & 0xffff);
           this.state.A = (this.state.A & 0xff00) | value;
           this.setZNFromValue(value, 8);
         } else {
-          const value = this.read16(bank & 0xff, addr);
+          const value = this.read16Cross(bank & 0xff, addr);
           this.state.A = value;
           this.setZNFromValue(value, 16);
         }
@@ -2069,7 +2083,7 @@ this.write16(effBank, eff, m & 0xffff);
           this.state.A = (this.state.A & 0xff00) | value;
           this.setZNFromValue(value, 8);
         } else {
-          const value = this.read16(effBank, effAddr);
+          const value = this.read16Cross(effBank, effAddr);
           this.state.A = value;
           this.setZNFromValue(value, 16);
         }
@@ -2126,7 +2140,7 @@ this.write16(bank, eff, value & 0xffff);
           this.write8(bank, addr, value);
         } else {
           const value = this.state.A & 0xffff;
-          this.write16(bank, addr, value & 0xffff);
+          this.write16Cross(bank, addr, value & 0xffff);
         }
         break;
       }
@@ -2135,13 +2149,17 @@ this.write16(bank, eff, value & 0xffff);
         const hi = this.fetch8();
         const bank = this.fetch8() & 0xff;
         const base = ((hi << 8) | lo) & 0xffff;
-        const eff = (base + this.indexX()) & 0xffff;
+        // Long indexed carries into bank on overflow
+        const sum24 = (bank << 16) | base;
+        const indexed24 = (sum24 + this.indexX()) >>> 0;
+        const effBank = (indexed24 >>> 16) & 0xff;
+        const effAddr = indexed24 & 0xffff;
         if (this.m8) {
           const value = this.state.A & 0xff;
-          this.write8(bank, eff, value);
+          this.write8(effBank, effAddr, value);
         } else {
           const value = this.state.A & 0xffff;
-          this.write16(bank, eff, value & 0xffff);
+          this.write16Cross(effBank, effAddr, value & 0xffff);
         }
         break;
       }
@@ -2530,17 +2548,14 @@ const m = this.read16(this.state.DBR, addr);
       }
       case 0x23: { // AND sr
         const sr = this.fetch8();
-        const base = this.srBase();
-        const eff = (base + (sr & 0xff)) & 0xffff;
+        const eff = this.srAddr(sr & 0xff);
         if (this.m8) {
           const m = this.read8(0x00, eff as Word);
           const res = (this.state.A & 0xff) & m;
           this.state.A = (this.state.A & 0xff00) | res;
           this.setZNFromValue(res, 8);
         } else {
-          const lo = this.read8(0x00, eff as Word);
-          const hi = this.read8(0x00, ((eff + 1) & 0xffff) as Word);
-          const m = ((hi << 8) | lo) & 0xffff;
+          const m = this.read16(0x00, eff as Word);
           const res = (this.state.A & 0xffff) & m;
           this.state.A = res;
           this.setZNFromValue(res, 16);
@@ -2590,7 +2605,7 @@ const m = this.read16(this.state.DBR, addr);
           this.state.A = (this.state.A & 0xff00) | res;
           this.setZNFromValue(res, 8);
         } else {
-          const m = this.read16(bank, addr);
+          const m = this.read16Cross(bank, addr);
           const res = (this.state.A & 0xffff) & m;
           this.state.A = res;
           this.setZNFromValue(res, 16);
@@ -2612,7 +2627,7 @@ const m = this.read16(this.state.DBR, addr);
           this.state.A = (this.state.A & 0xff00) | res;
           this.setZNFromValue(res, 8);
         } else {
-          const m = this.read16(effBank, effAddr);
+          const m = this.read16Cross(effBank, effAddr);
           const res = (this.state.A & 0xffff) & m;
           this.state.A = res;
           this.setZNFromValue(res, 16);
@@ -2628,7 +2643,7 @@ const m = this.read16(this.state.DBR, addr);
           this.state.A = (this.state.A & 0xff00) | res;
           this.setZNFromValue(res, 8);
         } else {
-          const m = this.read16(bank, addr);
+          const m = this.read16Cross(bank, addr);
           const res = (this.state.A & 0xffff) & m;
           this.state.A = res;
           this.setZNFromValue(res, 16);
@@ -2644,7 +2659,7 @@ const m = this.read16(this.state.DBR, addr);
           this.state.A = (this.state.A & 0xff00) | res;
           this.setZNFromValue(res, 8);
         } else {
-          const m = this.read16(bank, addr);
+          const m = this.read16Cross(bank, addr);
           const res = (this.state.A & 0xffff) & m;
           this.state.A = res;
           this.setZNFromValue(res, 16);
@@ -2785,16 +2800,14 @@ const m = this.read16(this.state.DBR, addr);
       }
       case 0x03: { // ORA sr
         const sr = this.fetch8();
-        const base = this.state.E ? (((this.state.S & 0xff) + sr) & 0xff | 0x0100) : ((this.state.S + sr) & 0xffff);
+        const eff = this.srAddr(sr & 0xff);
         if (this.m8) {
-          const m = this.read8(0x00, base as Word);
+          const m = this.read8(0x00, eff as Word);
           const res = (this.state.A & 0xff) | m;
           this.state.A = (this.state.A & 0xff00) | res;
           this.setZNFromValue(res, 8);
         } else {
-          const lo = this.read8(0x00, base as Word);
-          const hi = this.read8(0x00, ((base + 1) & 0xffff) as Word);
-          const m = ((hi << 8) | lo) & 0xffff;
+          const m = this.read16(0x00, eff as Word);
           const res = (this.state.A & 0xffff) | m;
           this.state.A = res;
           this.setZNFromValue(res, 16);
@@ -2844,7 +2857,7 @@ const m = this.read16(bank, addr);
           this.state.A = (this.state.A & 0xff00) | (res & 0xff);
           this.setZNFromValue(res, 8);
         } else {
-          const m = this.read16(bank, addr);
+          const m = this.read16Cross(bank, addr);
           const res = (this.state.A & 0xffff) | m;
           this.state.A = res & 0xffff;
           this.setZNFromValue(res, 16);
@@ -2866,7 +2879,7 @@ const m = this.read16(bank, addr);
           this.state.A = (this.state.A & 0xff00) | (res & 0xff);
           this.setZNFromValue(res, 8);
         } else {
-          const m = this.read16(effBank, effAddr);
+          const m = this.read16Cross(effBank, effAddr);
           const res = (this.state.A & 0xffff) | m;
           this.state.A = res & 0xffff;
           this.setZNFromValue(res, 16);
@@ -2886,7 +2899,7 @@ const m = this.read16(bank, addr);
           this.state.A = (this.state.A & 0xff00) | (res & 0xff);
           this.setZNFromValue(res, 8);
         } else {
-          const m = this.read16(bank, addr);
+          const m = this.read16Cross(bank, addr);
           const res = (this.state.A & 0xffff) | m;
           this.state.A = res & 0xffff;
           this.setZNFromValue(res, 16);
@@ -2902,7 +2915,7 @@ const m = this.read16(bank, addr);
           this.state.A = (this.state.A & 0xff00) | (res & 0xff);
           this.setZNFromValue(res, 8);
         } else {
-          const m = this.read16(bank, addr);
+          const m = this.read16Cross(bank, addr);
           const res = (this.state.A & 0xffff) | m;
           this.state.A = res & 0xffff;
           this.setZNFromValue(res, 16);
@@ -3043,17 +3056,14 @@ const m = this.read16(bank, addr);
       }
       case 0x43: { // EOR sr
         const sr = this.fetch8();
-        const base = this.srBase();
-        const eff = (base + (sr & 0xff)) & 0xffff;
+        const eff = this.srAddr(sr & 0xff);
         if (this.m8) {
           const m = this.read8(0x00, eff as Word);
           const res = (this.state.A & 0xff) ^ m;
           this.state.A = (this.state.A & 0xff00) | res;
           this.setZNFromValue(res, 8);
         } else {
-          const lo = this.read8(0x00, eff as Word);
-          const hi = this.read8(0x00, ((eff + 1) & 0xffff) as Word);
-          const m = ((hi << 8) | lo) & 0xffff;
+          const m = this.read16(0x00, eff as Word);
           const res = (this.state.A & 0xffff) ^ m;
           this.state.A = res;
           this.setZNFromValue(res, 16);
@@ -3103,7 +3113,7 @@ const m = this.read16(bank, addr);
           this.state.A = (this.state.A & 0xff00) | (res & 0xff);
           this.setZNFromValue(res, 8);
         } else {
-          const m = this.read16(bank, addr);
+          const m = this.read16Cross(bank, addr);
           const res = (this.state.A & 0xffff) ^ m;
           this.state.A = res & 0xffff;
           this.setZNFromValue(res, 16);
@@ -3125,7 +3135,7 @@ const m = this.read16(bank, addr);
           this.state.A = (this.state.A & 0xff00) | (res & 0xff);
           this.setZNFromValue(res, 8);
         } else {
-          const m = this.read16(effBank, effAddr);
+          const m = this.read16Cross(effBank, effAddr);
           const res = (this.state.A & 0xffff) ^ m;
           this.state.A = res & 0xffff;
           this.setZNFromValue(res, 16);
@@ -3141,7 +3151,7 @@ const m = this.read16(bank, addr);
           this.state.A = (this.state.A & 0xff00) | (res & 0xff);
           this.setZNFromValue(res, 8);
         } else {
-          const m = this.read16(bank, addr);
+          const m = this.read16Cross(bank, addr);
           const res = (this.state.A & 0xffff) ^ m;
           this.state.A = res & 0xffff;
           this.setZNFromValue(res, 16);
@@ -3157,7 +3167,7 @@ const m = this.read16(bank, addr);
           this.state.A = (this.state.A & 0xff00) | (res & 0xff);
           this.setZNFromValue(res, 8);
         } else {
-          const m = this.read16(bank, addr);
+          const m = this.read16Cross(bank, addr);
           const res = (this.state.A & 0xffff) ^ m;
           this.state.A = res & 0xffff;
           this.setZNFromValue(res, 16);
@@ -3650,8 +3660,7 @@ const v = this.read16(this.state.DBR, addr);
       }
       case 0xa3: { // LDA sr (stack-relative)
         const sr = this.fetch8();
-        const base = this.srBase();
-        const eff = (base + (sr & 0xff)) & 0xffff;
+        const eff = this.srAddr(sr & 0xff);
         if (this.m8) {
           const value = this.read8(0x00, eff);
           this.state.A = (this.state.A & 0xff00) | value;
@@ -3675,7 +3684,7 @@ const v = this.read16(this.state.DBR, addr);
           this.state.A = (this.state.A & 0xff00) | value;
           this.setZNFromValue(value, 8);
         } else {
-          const value = this.read16(bank, addr);
+          const value = this.read16Cross(bank, addr);
           this.state.A = value;
           this.setZNFromValue(value, 16);
         }
@@ -3689,7 +3698,7 @@ const v = this.read16(this.state.DBR, addr);
           this.state.A = (this.state.A & 0xff00) | value;
           this.setZNFromValue(value, 8);
         } else {
-          const value = this.read16(bank, addr);
+          const value = this.read16Cross(bank, addr);
           this.state.A = value;
           this.setZNFromValue(value, 16);
         }
@@ -3746,8 +3755,7 @@ const v = this.read16(this.state.DBR, addr);
       }
       case 0x83: { // STA sr (stack-relative)
         const sr = this.fetch8();
-        const base = this.srBase();
-        const eff = (base + (sr & 0xff)) & 0xffff;
+        const eff = this.srAddr(sr & 0xff);
         if (this.m8) {
           const value = this.state.A & 0xff;
           this.write8(0x00, eff, value);
@@ -3769,7 +3777,7 @@ const v = this.read16(this.state.DBR, addr);
           this.write8(bank, addr, value);
         } else {
           const value = this.state.A & 0xffff;
-          this.write16(bank, addr, value & 0xffff);
+          this.write16Cross(bank, addr, value & 0xffff);
         }
         break;
       }
@@ -3781,7 +3789,7 @@ const v = this.read16(this.state.DBR, addr);
           this.write8(bank, addr, value);
         } else {
           const value = this.state.A & 0xffff;
-          this.write16(bank, addr, value & 0xffff);
+          this.write16Cross(bank, addr, value & 0xffff);
         }
         break;
       }
@@ -3869,15 +3877,12 @@ case 0xc9: { // CMP #imm
       }
       case 0xc3: { // CMP sr (stack relative)
         const sr = this.fetch8();
-        const base = this.srBase();
-        const eff = (base + (sr & 0xff)) & 0xffff;
+        const eff = this.srAddr(sr & 0xff);
         if (this.m8) {
           const v = this.read8(0x00, eff as Word);
           this.cmpValues(this.state.A & 0xff, v, 8);
         } else {
-          const lo = this.read8(0x00, eff as Word);
-          const hi = this.read8(0x00, ((eff + 1) & 0xffff) as Word);
-          const v = ((hi << 8) | lo) & 0xffff;
+          const v = this.read16(0x00, eff as Word);
           this.cmpValues(this.state.A & 0xffff, v, 16);
         }
         break;
@@ -3927,7 +3932,7 @@ case 0xc9: { // CMP #imm
           const v = this.read8(bank, addr);
           this.cmpValues(this.state.A & 0xff, v, 8);
         } else {
-          const v = this.read16(bank, addr);
+          const v = this.read16Cross(bank, addr);
           this.cmpValues(this.state.A & 0xffff, v, 16);
         }
         break;
@@ -3945,7 +3950,7 @@ case 0xc9: { // CMP #imm
           const v = this.read8(effBank, effAddr);
           this.cmpValues(this.state.A & 0xff, v, 8);
         } else {
-          const v = this.read16(effBank, effAddr);
+          const v = this.read16Cross(effBank, effAddr);
           this.cmpValues(this.state.A & 0xffff, v, 16);
         }
         break;
@@ -3957,7 +3962,7 @@ case 0xc9: { // CMP #imm
           const v = this.read8(bank, addr);
           this.cmpValues(this.state.A & 0xff, v, 8);
         } else {
-          const v = this.read16(bank, addr);
+          const v = this.read16Cross(bank, addr);
           this.cmpValues(this.state.A & 0xffff, v, 16);
         }
         break;
@@ -3969,7 +3974,7 @@ case 0xc9: { // CMP #imm
           const v = this.read8(bank, addr);
           this.cmpValues(this.state.A & 0xff, v, 8);
         } else {
-          const v = this.read16(bank, addr);
+          const v = this.read16Cross(bank, addr);
           this.cmpValues(this.state.A & 0xffff, v, 16);
         }
         break;

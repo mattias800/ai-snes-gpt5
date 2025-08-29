@@ -17,7 +17,7 @@ function boot(romPath: string): Emulator {
   return emu;
 }
 
-const ROOT = process.env.SNES_TESTS_DIR || path.resolve('third_party/snes-tests');
+const ROOT = process.env.SNES_TESTS_DIR || path.resolve('test-roms/snes-tests');
 const CPU_DIR = path.join(ROOT, 'cputest');
 const SPC_DIR = path.join(ROOT, 'spctest');
 
