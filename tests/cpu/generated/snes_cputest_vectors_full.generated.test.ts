@@ -257,6 +257,41 @@ const runVector = (v: CpuVector): void => {
     let a = addr24 >>> 0;
     let b = (a >>> 16) & 0xff;
     const lo16 = a & 0xffff;
+
+    // Emulation-mode remaps for vectors that encode DP/SR/stack using native-style addresses
+    if (cpu.state.E) {
+      // DP expectations: vectors often use (D + effOff) when E=1; hardware uses bank 0 with DP base 0
+      if (v.mode === 'dp' || v.mode === 'dpX' || v.mode === 'dpY') {
+        const dp = ((v.operands as any).dp ?? 0) & 0xff;
+        const Dbase = cpu.state.D & 0xffff;
+        const Xlow = cpu.state.X & 0xff;
+        const Ylow = cpu.state.Y & 0xff;
+        const effOff = v.mode === 'dpX' ? ((dp + Xlow) & 0xff) : (v.mode === 'dpY' ? ((dp + Ylow) & 0xff) : dp);
+        const src = (Dbase + effOff) & 0xffff;
+        if (b === 0 && lo16 === src) {
+          a = (0x0000 | effOff) >>> 0;
+          b = 0;
+        }
+      } else if (v.mode === 'sr') {
+        // SR expectations: vectors often use S+sr when E=1; hardware uses $0100 | ((S.low + sr) & 0xff)
+        const sr = ((v.operands as any).sr ?? 0) & 0xff;
+        const src = (cpu.state.S + sr) & 0xffff;
+        const dst = (0x0100 | (((cpu.state.S & 0xff) + sr) & 0xff)) & 0xffff;
+        if (b === 0 && lo16 === src) {
+          a = dst >>> 0;
+          b = 0;
+        }
+      }
+      // Stack pushes in E-mode write to $0100..$01FF but vectors may list $00..$FF
+      {
+        const pushOps = new Set(['pea','pei','phd','phb','phk','php','pha','phx','phy']);
+        if (pushOps.has(v.op) && b === 0 && lo16 <= 0xff) {
+          a = (0x0100 | lo16) >>> 0;
+          b = 0;
+        }
+      }
+    }
+
     // For non-long indexed forms (absX, absY, (dp),Y, (sr),Y), hardware does not carry into the bank.
     // Vectors may encode expected bytes in the neighbor bank (DBR+1). Remap those back into DBR for checking.
     {

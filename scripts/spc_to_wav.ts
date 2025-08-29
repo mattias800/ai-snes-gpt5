@@ -16,6 +16,9 @@ interface CliArgs {
   allowSilence: boolean;
   gain: number;
   prerollMs: number;
+  mask: number | null;
+  forcePan: number | null;
+  forcePanMs: number;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -32,12 +35,18 @@ function parseArgs(argv: string[]): CliArgs {
   const allowSilence = (args['allow-silence'] === '1' || args['allowSilence'] === '1');
   const gain = Number(args['gain'] || '1');
   const prerollMs = Number(args['preroll-ms'] || args['preroll'] || '200');
+  const mask = args['mask'] != null ? Number(args['mask']) : null;
+  const forcePan = args['force-pan'] != null ? Number(args['force-pan']) : null;
+  const forcePanMs = Number(args['force-pan-ms'] || '0');
   if (!Number.isFinite(seconds) || seconds <= 0) throw new Error('Invalid --seconds');
   if (!Number.isFinite(rate) || rate <= 0) throw new Error('Invalid --rate');
   if (channels !== 1 && channels !== 2) throw new Error('Invalid --channels (1 or 2)');
   if (!Number.isFinite(gain) || gain <= 0) throw new Error('Invalid --gain');
   if (!Number.isFinite(prerollMs) || prerollMs < 0) throw new Error('Invalid --preroll-ms');
-  return { in: inPath, out: outPath, seconds, rate, channels: channels as 1 | 2, allowSilence, gain, prerollMs };
+  if (mask != null && (!Number.isFinite(mask) || mask < 0 || mask > 0xff)) throw new Error('Invalid --mask (0..255)');
+  if (forcePan != null && (!Number.isFinite(forcePan) || forcePan < 0 || forcePan > 7)) throw new Error('Invalid --force-pan (0..7)');
+  if (!Number.isFinite(forcePanMs) || forcePanMs < 0) throw new Error('Invalid --force-pan-ms');
+  return { in: inPath, out: outPath, seconds, rate, channels: channels as 1 | 2, allowSilence, gain, prerollMs, mask, forcePan, forcePanMs };
 }
 
 function writeWavPCM16LE(samples: Int16Array, sampleRate: number, channels: number): Buffer {
@@ -77,6 +86,11 @@ async function main() {
   const apu = new APUDevice();
   apu.setMixGain(args.gain);
   loadSpcIntoApu(apu, spcBuf);
+  if (args.mask != null) apu.setVoiceMask(args.mask);
+  if (args.forcePan != null && args.forcePanMs > 0) {
+    const frames = Math.max(1, Math.round((args.forcePanMs/1000) * args.rate));
+    apu.setForcePan(args.forcePan, frames);
+  }
 
   const totalFrames = Math.floor(args.seconds * args.rate);
   const totalSamples = totalFrames * args.channels;

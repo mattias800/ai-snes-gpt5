@@ -711,6 +711,17 @@ export class SMP {
         return 5;
       }
 
+      // --- Compare memory (dp) with immediate: CMP dp,#imm (opcode 0x78) ---
+      case 0x78: {
+        const dp = this.read8(this.PC); const imm = this.read8((this.PC + 1) & 0xffff);
+        this.PC = (this.PC + 2) & 0xffff;
+        const m = this.readDP(dp) & 0xff; const k = imm & 0xff;
+        const r = (m - k) & 0xff;
+        if (m >= k) this.PSW |= SMP.C; else this.PSW &= ~SMP.C;
+        this.setZN8(r);
+        return 5;
+      }
+
       // --- Special op: XCN (nibble swap A) ---
       case 0x9f: {
         const hi = (this.A << 4) & 0xf0;

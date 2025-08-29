@@ -43,7 +43,20 @@ export class SDSP {
   private traceMix = false;
   private traceMaxFrames = 0;
   private traceFrames: any[] = [];
-  beginMixTrace(maxFrames: number) { this.traceMix = true; this.traceMaxFrames = Math.max(0, maxFrames|0); this.traceFrames = []; }
+  // Guard counters to detect a dead left pipeline while right has signal
+  private guardLZero = 0;
+  private guardRNonZero = 0;
+  // Force-pan debug (index: 0..7, -1 disables). Applies for given number of mixSample frames
+  private forcePanVoice = -1;
+  private forcePanFramesLeft = 0;
+  setForcePan(voiceIndex: number, frames: number) {
+    this.forcePanVoice = (voiceIndex|0);
+    this.forcePanFramesLeft = Math.max(0, frames|0);
+  }
+  beginMixTrace(maxFrames: number) {
+    this.traceMix = true; this.traceMaxFrames = Math.max(0, maxFrames|0); this.traceFrames = [];
+    this.guardLZero = 0; this.guardRNonZero = 0;
+  }
   endMixTrace() { this.traceMix = false; }
   getMixTrace(): any[] { return this.traceFrames.slice(); }
 
@@ -188,6 +201,7 @@ export class SDSP {
     const eon = this.eonMask & 0xff;
 
     const frameTraceVoices: any[] = this.traceMix ? [] : null as any;
+    let tracedGlobals = false;
 
     for (let i = 0; i < 8; i++) {
       if (((this.voiceMask >>> i) & 1) === 0) continue;
@@ -227,10 +241,15 @@ export class SDSP {
       s = s * envVal;
 
       // Apply per-voice volumes (signed), keep as float until final clamp
-      const vl = (s * v.volL) / 128;
-      const vr = (s * v.volR) / 128;
+      let volL = v.volL | 0;
+      let volR = v.volR | 0;
+      if (this.forcePanFramesLeft > 0 && this.forcePanVoice === i) {
+        volL = 127; volR = 0;
+      }
+      const vl = (s * volL) / 128;
+      const vr = (s * volR) / 128;
 
-      if (frameTraceVoices) frameTraceVoices.push({ i, sApprox, env: envVal, s, volL: v.volL, volR: v.volR, vl, vr });
+      if (frameTraceVoices) frameTraceVoices.push({ i, sApprox, env: envVal, s, volL: volL, volR: volR, vl, vr });
 
       dryL += vl;
       dryR += vr;
@@ -275,8 +294,31 @@ export class SDSP {
     this.debug = { dryL, dryR, echoInL, echoInR, firL, firR, outL, outR, mvolL, mvolR, evolL, evolR };
 
     if (this.traceMix && this.traceFrames.length < this.traceMaxFrames) {
+      // On the very first frame, snapshot key DSP globals for context
+      if (!tracedGlobals && this.traceFrames.length === 0) {
+        const s8 = (x: number) => ((x << 24) >> 24);
+        const r8 = (a: number) => this.regs[a & 0x7f] & 0xff;
+        const globals = {
+          FLG: r8(0x6c), KON: r8(0x4c), KOF: r8(0x5c),
+          MVOLL: s8(r8(0x0c)), MVOLR: s8(r8(0x1c)), EVOLL: s8(r8(0x2c)), EVOLR: s8(r8(0x3c)),
+          EON: r8(0x4d), ESA: r8(0x6d), EDL: r8(0x7d) & 0x0f, DIR: r8(0x5d)
+        };
+        this.traceFrames.push({ globals });
+        tracedGlobals = true;
+      }
       this.traceFrames.push({ dryL, dryR, outL, outR, voices: frameTraceVoices || [] });
+      // Guard detection: count frames where left is exactly zero while right has any magnitude
+      if (l === 0) this.guardLZero++; else this.guardLZero = 0;
+      if (r !== 0) this.guardRNonZero++; else this.guardRNonZero = 0;
+      if (this.guardLZero >= 64 && this.guardRNonZero >= 64) {
+        this.traceFrames.push({ guard: 'left_pipeline_dead_suspected', at: this.traceFrames.length });
+        // reset to avoid spamming
+        this.guardLZero = 0; this.guardRNonZero = 0;
+      }
     }
+
+    // Decrement force-pan window if active
+    if (this.forcePanFramesLeft > 0) this.forcePanFramesLeft--;
 
     return [l, r];
   }

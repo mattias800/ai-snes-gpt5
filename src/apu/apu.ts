@@ -173,6 +173,7 @@ export class APUDevice {
   beginMixTrace(maxFrames: number): void { (this.dsp as any).beginMixTrace?.(maxFrames); }
   endMixTrace(): void { (this.dsp as any).endMixTrace?.(); }
   getMixTrace(): any[] { return (this.dsp as any).getMixTrace?.() || []; }
+  setForcePan(voiceIndex: number, frames: number): void { (this.dsp as any).setForcePan?.(voiceIndex, frames); }
 
   // Initialize IO registers ($F1 control and timer targets) from an SPC snapshot
   setIoFromSnapshot(f1: number, t0Target: number, t1Target: number, t2Target: number): void {
