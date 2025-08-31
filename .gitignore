@@ -7,3 +7,10 @@ coverage/
 
 *.sfc
 *.spc
+
+# Large traces and logs (prevent accidental commits >100MB)
+smw-trace.log
+*.log
+*.jsonl
+trace-*.txt
+*.trace
