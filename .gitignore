@@ -7,6 +7,7 @@ coverage/
 
 *.sfc
 *.spc
+*.wav
 
 # Large traces and logs (prevent accidental commits >100MB)
 smw-trace.log
