@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Pre-commit guard: prevent committing files larger than a threshold (default 90MB)
+# Configure per-run: HOOK_MAX_FILE_MB=95 git commit -m "..."
+set -euo pipefail
+
+THRESHOLD_MB="${HOOK_MAX_FILE_MB:-90}"
+if ! [[ "$THRESHOLD_MB" =~ ^[0-9]+$ ]]; then THRESHOLD_MB=90; fi
+THRESHOLD_BYTES=$(( THRESHOLD_MB * 1024 * 1024 ))
+
+# Gather staged paths (added/modified/copied/renamed), NUL-delimited
+violations=0
+
+while IFS= read -r -d '' path; do
+  # Prefer size of the staged blob if available
+  size=""
+  if sha=$(git ls-files -s -- "$path" 2>/dev/null | awk '{print $2; exit}'); then
+    if [ -n "$sha" ]; then
+      if size=$(git cat-file -s "$sha" 2>/dev/null); then :; fi
+    fi
+  fi
+  # Fallback to filesystem size if needed
+  if [ -z "${size:-}" ]; then
+    if size=$(stat -f%z -- "$path" 2>/dev/null); then :;
+    elif size=$(wc -c < "$path" 2>/dev/null | tr -d ' '); then :;
+    else
+      size=0
+    fi
+  fi
+  if [ "$size" -gt "$THRESHOLD_BYTES" ]; then
+    mb=$(( (size + 1048575) / 1048576 ))
+    echo "Blocked: $path is ${mb} MB (${size} bytes) (limit ${THRESHOLD_MB}MB)"
+    violations=$((violations+1))
+  fi
+done < <(git diff --cached --name-only -z --diff-filter=ACMR)
+
+if [ "$violations" -gt 0 ]; then
+  echo "Pre-commit blocked: one or more staged files exceed ${THRESHOLD_MB}MB."
+  echo "Tip: adjust per-commit with HOOK_MAX_FILE_MB=NN (e.g., HOOK_MAX_FILE_MB=95 git commit ...)"
+  exit 1
+fi
+
+exit 0
+
