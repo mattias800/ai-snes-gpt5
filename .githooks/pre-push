@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Pre-push guard: block pushes that introduce blobs larger than a threshold (default 90MB)
+# Configure threshold by setting HOOK_MAX_FILE_MB, e.g.:
+#   HOOK_MAX_FILE_MB=95 git push
+set -euo pipefail
+
+THRESHOLD_MB="${HOOK_MAX_FILE_MB:-90}"
+if ! [[ "$THRESHOLD_MB" =~ ^[0-9]+$ ]]; then THRESHOLD_MB=90; fi
+THRESHOLD_BYTES=$(( THRESHOLD_MB * 1024 * 1024 ))
+
+# Collect ref updates from stdin: <local_ref> <local_sha> <remote_ref> <remote_sha>
+updates=()
+while IFS=$' \t' read -r local_ref local_sha remote_ref remote_sha; do
+  # Skip empty lines
+  [ -z "${local_ref:-}" ] && continue || true
+  updates+=("${local_sha}:${remote_sha}")
+done || true
+
+# If run outside of git pre-push (no stdin), fall back to comparing HEAD to upstream if any
+if [ "${#updates[@]}" -eq 0 ]; then
+  local_sha=$(git rev-parse HEAD)
+  remote_sha=$(git rev-parse @{u} 2>/dev/null || echo "")
+  if [ -n "$remote_sha" ]; then updates=("${local_sha}:${remote_sha}"); else updates=("${local_sha}:"); fi
+fi
+
+mapfile_tmp=$(mktemp)
+trap 'rm -f "$mapfile_tmp" "$mapfile_tmp.dups"' EXIT
+
+for up in "${updates[@]}"; do
+  local_sha="${up%%:*}"
+  remote_sha="${up#*:}"
+  # Skip deletions
+  if [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+    continue
+  fi
+  if [ -z "$remote_sha" ] || [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then
+    git rev-list --objects "$local_sha" >>"$mapfile_tmp" || true
+  else
+    git rev-list --objects "$local_sha" --not "$remote_sha" >>"$mapfile_tmp" || true
+  fi
+done
+
+# Deduplicate by object id, keeping first path
+awk '!seen[$1]++ { print }' "$mapfile_tmp" > "$mapfile_tmp.dups"
+
+violations=0
+while IFS=$' ' read -r sha path_rest; do
+  [ -z "${sha:-}" ] && continue || true
+  type=$(git cat-file -t "$sha" 2>/dev/null || echo "")
+  if [ "$type" != "blob" ]; then
+    continue
+  fi
+  size=$(git cat-file -s "$sha" 2>/dev/null || echo 0)
+  if [ "$size" -gt "$THRESHOLD_BYTES" ]; then
+    # Extract the path if present (may be empty if unreachable from a path)
+    path="${path_rest:-}"
+    printf "Blocked: %s (%s bytes) %s\n" "$sha" "$size" "${path}"
+    violations=$((violations+1))
+  fi
+done < "$mapfile_tmp.dups"
+
+if [ "$violations" -gt 0 ]; then
+  echo "Pre-push blocked: one or more blobs exceed ${THRESHOLD_MB}MB."
+  echo "Tip: Set HOOK_MAX_FILE_MB to adjust the limit (e.g., HOOK_MAX_FILE_MB=95 git push)."
+  echo "If the large object is already in remote history, rewrite history to remove it first."
+  exit 1
+fi
+
+exit 0
+
