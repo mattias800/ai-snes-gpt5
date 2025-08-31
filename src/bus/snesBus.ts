@@ -604,19 +604,24 @@ export class SNESBus implements IMemoryBus {
   private performMDMA(mask: Byte): void {
     for (let ch = 0; ch < 8; ch++) {
       if ((mask & (1 << ch)) === 0) continue;
-      const mode = this.dmap[ch] & 0x07;
-      const dirBtoA = (this.dmap[ch] & 0x80) !== 0; // 1 = B->A, 0 = A->B
+      const dmap = this.dmap[ch] & 0xff;
+      const mode = dmap & 0x07; // transfer mode (0..7)
+      const fixedA = (dmap & 0x08) !== 0; // fixed A address (no increment)
+      const decA = (dmap & 0x10) !== 0;   // decrement A address
+      const dirBtoA = (dmap & 0x80) !== 0; // 1 = B->A, 0 = A->B
+
       const baseB = this.bbad[ch]; // $21xx base
       let aAddr = this.a1tl[ch];
       const aBank = this.a1b[ch];
-      let count = this.das[ch] || 0x10000; // 0 means 65536 bytes in hardware; here handle 0 as 0x10000
+      const initialCount = this.das[ch] || 0x10000; // 0 means 65536 bytes in hardware
+      let count = initialCount;
 
       while (count > 0) {
         // Determine B address per mode (support mode 0 and 1 only)
         let bOff = baseB;
         if (mode === 1) {
           // Alternate between base and base+1 per transfer
-          const toggled = ((this.das[ch] - count) & 1) !== 0;
+          const toggled = ((initialCount - count) & 1) !== 0;
           bOff = baseB + (toggled ? 1 : 0);
         }
         const bAddr = 0x002100 | (bOff & 0xff);
@@ -633,8 +638,11 @@ export class SNESBus implements IMemoryBus {
           this.mapWrite(bAddr, val);
         }
 
-        // Increment A address (mode 0/1 always increment)
-        aAddr = (aAddr + 1) & 0xffff;
+        // Update A address per flags
+        if (!fixedA) {
+          if (decA) aAddr = (aAddr - 1) & 0xffff;
+          else aAddr = (aAddr + 1) & 0xffff;
+        }
         count--;
       }
 

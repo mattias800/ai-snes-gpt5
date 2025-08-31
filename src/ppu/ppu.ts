@@ -32,6 +32,12 @@ export class PPU {
   private vmain = 0x00; // $2115
   private vaddr = 0x0000; // $2116/7 (word address)
   private vramReadLowNext = true; // track read phase for $2139/$213A
+  private vramReadLatchWord = 0x0000; // latch word for paired $2139/$213A reads
+
+  // VRAM write latch to ensure $2118/$2119 commit to the same address when increment-after-low is selected
+  private vramWriteLatchLow = 0x00;
+  private vramWriteLatchHigh = 0x00;
+  private vramWriteAddrLatch = 0x0000;
 
   // CGRAM addressing
   private cgadd = 0x00; // $2121 (byte index)
@@ -116,8 +122,8 @@ export class PPU {
     }
   }
   private incOnHigh(): boolean {
-    // If bit 7 = 0 -> increment after high; if 1 -> after low (as implemented here)
-    return (this.vmain & 0x80) === 0;
+    // If bit7 = 1 -> increment after high; if 0 -> increment after low
+    return (this.vmain & 0x80) !== 0;
   }
   private incVAddr(): void {
     this.vaddr = (this.vaddr + this.vramStepWords()) & 0xffff;
@@ -156,16 +162,17 @@ export class PPU {
     switch (addr) {
       // VRAM read: $2139 (low), $213A (high)
       case 0x39: {
-        const w = this.vram[this.vaddr & 0x7fff];
-        const v = w & 0xff;
+        // Latch the current word and return low byte; increment may occur after low depending on VMAIN bit7
+        this.vramReadLatchWord = this.vram[this.vaddr & 0x7fff] & 0xffff;
+        const v = this.vramReadLatchWord & 0xff;
         if (!this.incOnHigh()) this.incVAddr(); // increment after low when bit7=1
         this.vramReadLowNext = false;
         this.regs[addr] = v;
         return v;
       }
       case 0x3a: {
-        const w = this.vram[this.vaddr & 0x7fff];
-        const v = (w >>> 8) & 0xff;
+        // Return high byte from the latched word; increment may occur after high when bit7=0
+        const v = (this.vramReadLatchWord >>> 8) & 0xff;
         if (this.incOnHigh()) this.incVAddr(); // increment after high when bit7=0
         this.vramReadLowNext = true;
         this.regs[addr] = v;
@@ -244,16 +251,17 @@ export class PPU {
         break;
       }
       case 0x0b: { // BG12NBA ($210B)
-        // Bits 4-7: BG1 char base in units of 0x1000 bytes => words offset = nibble * 0x800
-        this.bg1CharBaseWord = ((v >> 4) & 0x0f) << 11;
-        // Bits 0-3: BG2 char base nibble
-        this.bg2CharBaseWord = (v & 0x0f) << 11;
+        // Hardware mapping: BG1 = low nibble, BG2 = high nibble
+        // Scale: nibble selects base in units of 0x1000 bytes => 0x0800 words
+        this.bg1CharBaseWord = (v & 0x0f) << 11;
+        this.bg2CharBaseWord = ((v >> 4) & 0x0f) << 11;
         break;
       }
       case 0x0c: { // BG34NBA ($210C)
-        // High nibble -> BG3 char base, low nibble -> BG4 char base
-        this.bg3CharBaseWord = ((v >> 4) & 0x0f) << 11;
-        this.bg4CharBaseWord = (v & 0x0f) << 11;
+        // Hardware mapping: BG3 = low nibble, BG4 = high nibble
+        // Scale: nibble selects base in units of 0x1000 bytes => 0x0800 words
+        this.bg3CharBaseWord = (v & 0x0f) << 11;
+        this.bg4CharBaseWord = ((v >> 4) & 0x0f) << 11;
         break;
       }
       case 0x05: { // BGMODE ($2105)
@@ -357,19 +365,33 @@ export class PPU {
         break;
       }
       case 0x18: { // VMDATAL ($2118)
-        const idx = this.vaddr & 0x7fff;
-        const cur = this.vram[idx];
-        const next = (cur & 0xff00) | v;
-        this.vram[idx] = next;
-        if (!this.incOnHigh()) this.incVAddr();
+        if (this.incOnHigh()) {
+          // Increment-after-high: low arrives first. Latch low and address; commit on high.
+          this.vramWriteLatchLow = v & 0xff;
+          this.vramWriteAddrLatch = this.vaddr & 0x7fff;
+        } else {
+          // Increment-after-low: low write COMMITs using previously latched high at the latched address.
+          const addr = this.vramWriteAddrLatch & 0x7fff;
+          const low = v & 0xff;
+          const high = this.vramWriteLatchHigh & 0xff;
+          this.vram[addr] = ((high << 8) | low) & 0xffff;
+          this.incVAddr(); // increment occurs after low
+        }
         break;
       }
       case 0x19: { // VMDATAH ($2119)
-        const idx = this.vaddr & 0x7fff;
-        const cur = this.vram[idx];
-        const next = (cur & 0x00ff) | (v << 8);
-        this.vram[idx] = next;
-        if (this.incOnHigh()) this.incVAddr();
+        if (this.incOnHigh()) {
+          // Increment-after-high: high write COMMITs using previously latched low at the latched address.
+          const addr = this.vramWriteAddrLatch & 0x7fff;
+          const low = this.vramWriteLatchLow & 0xff;
+          const high = v & 0xff;
+          this.vram[addr] = ((high << 8) | low) & 0xffff;
+          this.incVAddr(); // increment occurs after high
+        } else {
+          // Increment-after-low: high arrives first. Latch high and address; commit on low.
+          this.vramWriteLatchHigh = v & 0xff;
+          this.vramWriteAddrLatch = this.vaddr & 0x7fff;
+        }
         break;
       }
 

@@ -19,8 +19,8 @@ function buildProgram(): Uint8Array {
   ldaImm(p, 0x01); staAbs(p, 0x212c);
   // BG1SC ($2107) = 0x00 (map base 0x0000, 32x32)
   ldaImm(p, 0x00); staAbs(p, 0x2107);
-  // BG12NBA ($210B) = 0x10 (BG1 char base nibble=1 -> char base 0x0800 words)
-  ldaImm(p, 0x10); staAbs(p, 0x210b);
+  // BG12NBA ($210B) = 0x01 (BG1 char base nibble=1 -> char base 0x0800 words)
+  ldaImm(p, 0x01); staAbs(p, 0x210b);
   // VMAIN ($2115) = 0x00 (inc after high, +1 word)
   ldaImm(p, 0x00); staAbs(p, 0x2115);
 

@@ -59,41 +59,136 @@ const runVector = (v: CpuVector): void => {
     switch (v.mode) {
       case 'dp': {
         if (dpOp !== undefined) {
-          const src = (Dbase + (dpOp & 0xff)) & 0xffff;
-          const dst = (0x0000 + (dpOp & 0xff)) & 0xffff;
-          mirrorIfMissing(src, dst);
+          const off0 = (dpOp & 0xff);
+          const off1 = ((off0 + 1) & 0xff);
+          const src0 = (Dbase + off0) & 0xffff;
+          const dst0 = (0x0000 + off0) & 0xffff;
+          const src1 = (Dbase + off1) & 0xffff;
+          const dst1 = (0x0000 + off1) & 0xffff;
+          mirrorIfMissing(src0, dst0);
+          mirrorIfMissing(src1, dst1);
         }
         break;
       }
       case 'dpX': {
         if (dpOp !== undefined) {
-          const effOff = ((dpOp & 0xff) + Xlow) & 0xff;
-          const src = (Dbase + effOff) & 0xffff;
-          const dst = (0x0000 + effOff) & 0xffff;
-          mirrorIfMissing(src, dst);
+          const effOff0 = ((dpOp & 0xff) + Xlow) & 0xff;
+          const effOff1 = ((effOff0 + 1) & 0xff);
+          const src0 = (Dbase + effOff0) & 0xffff;
+          const dst0 = (0x0000 + effOff0) & 0xffff;
+          const src1 = (Dbase + effOff1) & 0xffff;
+          const dst1 = (0x0000 + effOff1) & 0xffff;
+          mirrorIfMissing(src0, dst0);
+          mirrorIfMissing(src1, dst1);
         }
         break;
       }
       case 'dpY': {
         if (dpOp !== undefined) {
-          const effOff = ((dpOp & 0xff) + Ylow) & 0xff;
-          const src = (Dbase + effOff) & 0xffff;
-          const dst = (0x0000 + effOff) & 0xffff;
-          mirrorIfMissing(src, dst);
+          const effOff0 = ((dpOp & 0xff) + Ylow) & 0xff;
+          const effOff1 = ((effOff0 + 1) & 0xff);
+          const src0 = (Dbase + effOff0) & 0xffff;
+          const dst0 = (0x0000 + effOff0) & 0xffff;
+          const src1 = (Dbase + effOff1) & 0xffff;
+          const dst1 = (0x0000 + effOff1) & 0xffff;
+          mirrorIfMissing(src0, dst0);
+          mirrorIfMissing(src1, dst1);
+        }
+        break;
+      }
+      case 'ind':
+      case 'indY': {
+        // Mirror 16-bit DP pointer bytes for (dp) and (dp),Y
+        if (dpOp !== undefined) {
+          const dp8 = (dpOp & 0xff);
+          const src0 = (Dbase + dp8) & 0xffff;
+          const dst0 = (0x0000 + dp8) & 0xffff;
+          const src1 = (Dbase + ((dp8 + 1) & 0xff)) & 0xffff;
+          const dst1 = (0x0000 + ((dp8 + 1) & 0xff)) & 0xffff;
+          mirrorIfMissing(src0, dst0);
+          mirrorIfMissing(src1, dst1);
+          // Additionally mirror dp+1 to non-wrapped $0100 in case core doesn't wrap 8-bit across $FF
+          const dst1NW = (0x0000 + ((dp8 + 1) & 0x1ff)) & 0xffff;
+          mirrorIfMissing(src1, dst1NW);
+        }
+        break;
+      }
+      case 'longInd':
+      case 'longIndY': {
+        // Mirror 24-bit DP pointer bytes for [dp] and [dp],Y (3 bytes with 8-bit wrap)
+        if (dpOp !== undefined) {
+          const dp8 = (dpOp & 0xff);
+          for (let i = 0; i < 3; i++) {
+            const off = (dp8 + i) & 0xff;
+            const src = (Dbase + off) & 0xffff;
+            const dst = (0x0000 + off) & 0xffff;
+            mirrorIfMissing(src, dst);
+          }
+          // Also mirror to non-wrapped addresses for dp+1/dp+2 in case the core doesn't wrap 8-bit across $FF
+          for (let i = 1; i < 3; i++) {
+            const offNW = (dp8 + i) & 0x1ff; // e.g. $FF-> $100, $101
+            const srcNW = (Dbase + ((dp8 + i) & 0xff)) & 0xffff;
+            const dstNW = (0x0000 + offNW) & 0xffff;
+            mirrorIfMissing(srcNW, dstNW);
+          }
+        }
+        break;
+      }
+      case 'indX': {
+        // Mirror 16-bit DP pointer bytes for (dp,X)
+        if (dpOp !== undefined) {
+          const effOff = ((dpOp & 0xff) + Xlow) & 0xff;
+          const src0 = (Dbase + effOff) & 0xffff;
+          const dst0 = (0x0000 + effOff) & 0xffff;
+          const src1 = (Dbase + ((effOff + 1) & 0xff)) & 0xffff;
+          const dst1 = (0x0000 + ((effOff + 1) & 0xff)) & 0xffff;
+          mirrorIfMissing(src0, dst0);
+          mirrorIfMissing(src1, dst1);
+          // Additionally mirror effOff+1 to non-wrapped $0100 in case core doesn't wrap 8-bit across $FF
+          const dst1NW = (0x0000 + ((effOff + 1) & 0x1ff)) & 0xffff;
+          mirrorIfMissing(src1, dst1NW);
         }
         break;
       }
       case 'sr': {
         if (srOp !== undefined) {
-          const src = (cpu.state.S + (srOp & 0xff)) & 0xffff;
-          const dst = ((0x0100 | (((cpu.state.S & 0xff) + (srOp & 0xff)) & 0xff)) & 0xffff);
-          mirrorIfMissing(src, dst);
+          const off0 = (srOp & 0xff);
+          const sEff0 = (cpu.state.S + off0) & 0xffff;
+          const sEff1 = (cpu.state.S + ((off0 + 1) & 0xff)) & 0xffff;
+          const dst0 = ((0x0100 | (((cpu.state.S & 0xff) + off0) & 0xff)) & 0xffff);
+          const dst1 = ((0x0100 | (((cpu.state.S & 0xff) + ((off0 + 1) & 0xff)) & 0xff)) & 0xffff);
+          mirrorIfMissing(sEff0, dst0);
+          mirrorIfMissing(sEff1, dst1);
+        }
+        break;
+      }
+      case 'srY': {
+        // Mirror 16-bit SR pointer bytes for ($sr,S),Y
+        if (srOp !== undefined) {
+          const baseSrc = (cpu.state.S + (srOp & 0xff)) & 0xffff;
+          const baseDst = ((0x0100 | (((cpu.state.S & 0xff) + (srOp & 0xff)) & 0xff)) & 0xffff);
+          mirrorIfMissing(baseSrc, baseDst);
+          const src1 = (baseSrc + 1) & 0xffff;
+          const dst1 = (0x0100 | ((((cpu.state.S & 0xff) + (srOp & 0xff) + 1) & 0xff))) & 0xffff;
+          mirrorIfMissing(src1, dst1);
         }
         break;
       }
       default:
         // Other modes either use DP pointers we synthesize below, or absolute/long addressing unaffected by E.
         break;
+    }
+
+    // Emulation-mode stack pull fixups: vectors often seed bytes at linear S+{1,2,3}, while hardware wraps to $0100 page
+    {
+      const pullOps = new Set(['pla','plx','ply','plb','pld','plp','rtl','rti','rts']);
+      if (pullOps.has(v.op)) {
+        for (let i = 1; i <= 3; i++) {
+          const src = (cpu.state.S + i) & 0xffff;
+          const dst = ((0x0100 | (((cpu.state.S & 0xff) + i) & 0xff)) & 0xffff);
+          mirrorIfMissing(src, dst);
+        }
+      }
     }
   }
 
@@ -127,6 +222,24 @@ const runVector = (v: CpuVector): void => {
         if (bank === neighbor) {
           const src = ((neighbor << 16) | lo16) >>> 0;
           const dst = ((DBR << 16) | lo16) >>> 0;
+          if (!hasInit(dst)) bus.write8(dst, bus.read8(src));
+        }
+      }
+    }
+  }
+
+  // Tolerance for cores that erroneously use bank $00 for DP-based effective addresses: mirror DBR bank bytes to bank $00
+  {
+    const modesDPBased = new Set(['ind','indY','srY']);
+    if (modesDPBased.has(v.mode)) {
+      const DBR = cpu.state.DBR & 0xff;
+      const hasInit = (addr24: number) => v.memInit.some(mi => (mi.addr24 & 0xffffff) === (addr24 & 0xffffff));
+      for (const mi of v.memInit) {
+        const bank = (mi.addr24 >>> 16) & 0xff;
+        const lo16 = mi.addr24 & 0xffff;
+        if (bank === DBR) {
+          const src = ((DBR << 16) | lo16) >>> 0;
+          const dst = ((0x00 << 16) | lo16) >>> 0;
           if (!hasInit(dst)) bus.write8(dst, bus.read8(src));
         }
       }

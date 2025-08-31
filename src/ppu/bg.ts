@@ -51,6 +51,7 @@ export function renderBG2RegionIndices(ppu: PPU, widthPixels: number, heightPixe
   const tileSize = (ppu as any).bg2TileSize16 ? 16 : 8;
   const mapWidth = ppu.bg2MapWidth64 ? 64 : 32;
   const mapHeight = ppu.bg2MapHeight64 ? 64 : 32;
+  const is2bpp = (ppu.bgMode === 0); // Mode 0: BG2 is 2bpp; otherwise default to 4bpp
 
   for (let y = 0; y < heightPixels; y++) {
     for (let x = 0; x < widthPixels; x++) {
@@ -79,7 +80,8 @@ export function renderBG2RegionIndices(ppu: PPU, widthPixels: number, heightPixe
       if (!(ppu as any).bg2TileSize16) {
         const sx = xFlip ? (7 - (inTileX & 7)) : (inTileX & 7);
         const sy = yFlip ? (7 - (inTileY & 7)) : (inTileY & 7);
-        const tile = render4bppTileIndices(ppu, charBase, tileIndexBase);
+        const tile = is2bpp ? render2bppTileIndices(ppu, charBase, tileIndexBase)
+                            : render4bppTileIndices(ppu, charBase, tileIndexBase);
         const pix = tile[sy * 8 + sx];
         out[y * widthPixels + x] = paletteGroup * 16 + pix;
       } else {
@@ -91,7 +93,8 @@ export function renderBG2RegionIndices(ppu: PPU, widthPixels: number, heightPixe
         const inSubX = effX & 7;
         const inSubY = effY & 7;
         const subTileIndex = tileIndexBase + subX + (subY << 4);
-        const tile = render4bppTileIndices(ppu, charBase, subTileIndex);
+        const tile = is2bpp ? render2bppTileIndices(ppu, charBase, subTileIndex)
+                            : render4bppTileIndices(ppu, charBase, subTileIndex);
         const pix = tile[inSubY * 8 + inSubX];
         out[y * widthPixels + x] = paletteGroup * 16 + pix;
       }
@@ -556,6 +559,7 @@ export function renderBG1RegionIndices(ppu: PPU, widthPixels: number, heightPixe
   const tileSize = ppu.bg1TileSize16 ? 16 : 8;
   const mapWidth = ppu.bg1MapWidth64 ? 64 : 32;
   const mapHeight = ppu.bg1MapHeight64 ? 64 : 32;
+  const is2bpp = (ppu.bgMode === 0); // Mode 0: BG1 is 2bpp; otherwise default to 4bpp
 
   for (let y = 0; y < heightPixels; y++) {
     for (let x = 0; x < widthPixels; x++) {
@@ -584,10 +588,11 @@ export function renderBG1RegionIndices(ppu: PPU, widthPixels: number, heightPixe
       const yFlip = (entry & 0x8000) !== 0;
 
       if (!ppu.bg1TileSize16) {
-        // 8x8 tiles (original behavior)
+        // 8x8 tiles
         const sx = xFlip ? (7 - (inTileX & 7)) : (inTileX & 7);
         const sy = yFlip ? (7 - (inTileY & 7)) : (inTileY & 7);
-        const tile = render4bppTileIndices(ppu, charBase, tileIndexBase);
+        const tile = is2bpp ? render2bppTileIndices(ppu, charBase, tileIndexBase)
+                            : render4bppTileIndices(ppu, charBase, tileIndexBase);
         const pix = tile[sy * 8 + sx];
         out[y * widthPixels + x] = paletteGroup * 16 + pix;
       } else {
@@ -601,7 +606,8 @@ export function renderBG1RegionIndices(ppu: PPU, widthPixels: number, heightPixe
 
         // Subtile index mapping: right +1, down +16
         const subTileIndex = tileIndexBase + subX + (subY << 4);
-        const tile = render4bppTileIndices(ppu, charBase, subTileIndex);
+        const tile = is2bpp ? render2bppTileIndices(ppu, charBase, subTileIndex)
+                            : render4bppTileIndices(ppu, charBase, subTileIndex);
         const pix = tile[inSubY * 8 + inSubX];
         out[y * widthPixels + x] = paletteGroup * 16 + pix;
       }

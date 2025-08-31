@@ -47,8 +47,8 @@ describe('PPU timing: color math add half with fixed color', () => {
     // Set fixed blue = 31 via COLDATA (select B with bit5)
     p.writeReg(COLDATA, 0x20 | 31);
 
-    // CGADSUB: use fixed (bit5), add (bit6=0), half (bit7=1)
-    p.writeReg(CGADSUB, 0xA0);
+    // CGADSUB: apply to BG1 (bit0), use fixed (bit5), add (bit6=0), half (bit7=1)
+    p.writeReg(CGADSUB, 0xA1);
 
     // Expected: (red + blue)/2 => (15,0,15) => 0x3C0F
     expect(p.getPixelRGB15()).toBe(0x3C0F);

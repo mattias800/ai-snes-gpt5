@@ -12,9 +12,13 @@ const $ = <T extends HTMLElement = HTMLElement>(sel: string) =>
 const romFile = $("#romFile") as HTMLInputElement;
 const ipsInput = $("#ips") as HTMLInputElement;
 const scaleInput = $("#scale") as HTMLInputElement;
+const apuCoreChk = $("#apuCore") as HTMLInputElement;
 const shimChk = $("#shim") as HTMLInputElement;
 const shimOnlyChk = $("#shimOnly") as HTMLInputElement;
 const shimTileChk = $("#shimTile") as HTMLInputElement;
+const apuIplHleChk = $("#apuIplHle") as HTMLInputElement;
+const nullIrqIplHleChk = $("#nullIrqIplHle") as HTMLInputElement;
+const rewriteNullIrqChk = $("#rewriteNullIrq") as HTMLInputElement;
 const statusEl = $("#status");
 const logEl = $("#log");
 const resetBtn = $("#resetBtn");
@@ -52,12 +56,18 @@ const held = new Map<Button, boolean>();
 
 function setEnvForShim() {
   const env: Record<string, string> = {};
-  if (shimChk.checked) env.SMW_APU_SHIM = "1"; else env.SMW_APU_SHIM = "0";
+  // Core/shim selection
+  env.APU_SPC700_CORE = apuCoreChk.checked ? "1" : "0";
+  env.SMW_APU_SHIM = shimChk.checked ? "1" : "0";
   // Handshake only determines if shim writes PPU
   env.SMW_APU_SHIM_ONLY_HANDSHAKE = shimOnlyChk.checked ? "1" : "0";
   // If ONLY_HANDSHAKE=1, force UNBLANK/TILE=0 to avoid conflicting writes
   env.SMW_APU_SHIM_UNBLANK = (!shimOnlyChk.checked && shimChk.checked) ? "1" : "0";
   env.SMW_APU_SHIM_TILE = (shimTileChk.checked && shimChk.checked && !shimOnlyChk.checked) ? "1" : "0";
+  // APU/SMP HLE toggles
+  env.APU_IPL_HLE = apuIplHleChk.checked ? "1" : "0";
+  env.APU_NULL_IRQ_IPL_HLE = nullIrqIplHleChk.checked ? "1" : "0";
+  env.APU_REWRITE_NULL_IRQ = rewriteNullIrqChk.checked ? "1" : "0";
   // Expose to code paths that read process.env
   (globalThis as any).process = { env };
 }
@@ -145,6 +155,17 @@ async function bootFromRomBytes(bytes: Uint8Array) {
   const _emu = Emulator.fromCartridge(cart);
   _emu.reset();
 
+  // If real APU core is active, forward HLE toggles now
+  try {
+    const apu = (_emu.bus as any).getAPUDevice?.();
+    const env = (globalThis as any).process?.env ?? {};
+    if (apu) {
+      if (typeof apu.setBootIplHle === 'function') apu.setBootIplHle(env.APU_IPL_HLE === '1');
+      if (typeof apu.setIplHleForNullIrqVectors === 'function') apu.setIplHleForNullIrqVectors(env.APU_NULL_IRQ_IPL_HLE !== '0');
+      // spc_loader rewrite flag is consumed when loading SPCs; we expose it to env regardless
+    }
+  } catch { /* noop */ }
+
   const ips = Math.max(50, Math.min(5000, Number(ipsInput.value) || 800));
   const _sched = new Scheduler(_emu, ips, { onCpuError: "throw" });
 
@@ -224,7 +245,7 @@ saveBtn.addEventListener("click", () => {
 });
 
 scaleInput.addEventListener("change", setCanvasScale);
-[shimChk, shimOnlyChk, shimTileChk].forEach((el) => el.addEventListener("change", () => {
+[apuCoreChk, shimChk, shimOnlyChk, shimTileChk, apuIplHleChk, nullIrqIplHleChk, rewriteNullIrqChk].forEach((el) => el.addEventListener("change", () => {
   // Re-apply env flags next boot. No hot reload for now.
   setEnvForShim();
 }));

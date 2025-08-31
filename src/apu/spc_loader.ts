@@ -49,6 +49,21 @@ export function loadSpcIntoApu(apu: APUDevice, buf: Buffer): void {
   const flg = flgOrig & ~0xc0; // clear bit7 RESET and bit6 MUTE
   dspWriteAddr(0x6c); dspWriteData(flg);
 
+  // Optional fallback: if IRQ/BRK vector is null (0xFFFF), install a RETI stub.
+  // Disabled by default; enable via APU_REWRITE_NULL_IRQ=1 if needed.
+  try {
+    const rewrite = (typeof process !== 'undefined') && (process.env?.APU_REWRITE_NULL_IRQ === '1');
+    if (rewrite) {
+      const vLo = apu.aram[0xffde] & 0xff;
+      const vHi = apu.aram[0xffdf] & 0xff;
+      if ((vLo === 0xff) && (vHi === 0xff)) {
+        apu.aram[0x0100] = 0x7f; // RETI
+        apu.aram[0xffde] = 0x00;
+        apu.aram[0xffdf] = 0x01;
+      }
+    }
+  } catch {}
+
   // CPU registers (best-effort)
   try {
     const pc = (buf[0x26] << 8) | buf[0x25];

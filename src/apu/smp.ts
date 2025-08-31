@@ -20,6 +20,12 @@ export class SMP {
   // Low-power states
   private sleeping = false;
   private stopped = false;
+  private lowPowerDisabled = false;
+
+  // Interrupt state
+  private irqPending = false;
+  // HLE option: if IRQ/BRK vector is $FFFF, immediately perform RETI (no-op IRQ)
+  private enableNullVectorIplHle = true;
 
   // Flags
   static readonly N = 0x80;
@@ -36,6 +42,26 @@ export class SMP {
   // Opcode tracing for diagnostics
   private traceOpcodes = false;
   private unknownOpCounts: Record<string, number> = {};
+
+  // Instruction ring buffer for debugging
+  private irSize = 0;
+  private irPos = 0;
+  private irBuf: { pc: number, op: number }[] = [];
+  enableInstrRing(size: number): void {
+    const s = Math.max(1, Math.min(8192, size | 0));
+    this.irSize = s; this.irPos = 0; this.irBuf = new Array(s);
+  }
+  getInstrRing(): { pc: number, op: number }[] {
+    if (this.irSize <= 0 || this.irBuf.length === 0) return [];
+    const out: { pc: number, op: number }[] = [];
+    for (let i = 0; i < this.irBuf.length; i++) {
+      const idx = (this.irPos + i) % this.irBuf.length;
+      const it = this.irBuf[idx];
+      if (it) out.push({ pc: it.pc, op: it.op });
+    }
+    return out;
+  }
+
   enableOpcodeTrace(on: boolean): void { this.traceOpcodes = !!on; this.unknownOpCounts = {}; }
   getUnknownOpcodeStats(): { op: number, count: number }[] {
     const out: { op:number,count:number }[] = [];
@@ -49,10 +75,15 @@ export class SMP {
   // External wake for SLEEP/STOP
   public wakeFromSleep(): void { this.sleeping = false; }
   public wakeFromStop(): void { this.stopped = false; }
+  public setLowPowerDisabled(on: boolean): void { this.lowPowerDisabled = !!on; if (on) { this.sleeping = false; this.stopped = false; } }
+  // External IRQ request (e.g., timers). Level-sensitive: stays pending until serviced
+  public requestIRQ(): void { this.irqPending = true; this.sleeping = false; this.stopped = false; }
+  // Config: enable/disable IPL-HLE for null IRQ vectors
+  public setIplHleForNullIrqVectors(on: boolean): void { this.enableNullVectorIplHle = !!on; }
   // Query low-power state for scheduler optimizations
-  public isSleeping(): boolean { return this.sleeping; }
-  public isStopped(): boolean { return this.stopped; }
-  public isLowPower(): boolean { return this.sleeping || this.stopped; }
+  public isSleeping(): boolean { return this.lowPowerDisabled ? false : this.sleeping; }
+  public isStopped(): boolean { return this.lowPowerDisabled ? false : this.stopped; }
+  public isLowPower(): boolean { return this.lowPowerDisabled ? false : (this.sleeping || this.stopped); }
 
   reset(): void {
     this.A = this.X = this.Y = 0;
@@ -61,6 +92,7 @@ export class SMP {
     this.PSW = 0x00;
     this.sleeping = false;
     this.stopped = false;
+    this.irqPending = false;
   }
 
   private read8(addr: number): number { return this.bus.read8(addr & 0xffff) & 0xff; }
@@ -109,11 +141,48 @@ export class SMP {
 
   stepInstruction(): number {
     // Handle low-power states
-    if (this.stopped) return 2; // remain halted
-    if (this.sleeping) return 2; // sleep until external wake (not modeled yet)
+    if (!this.lowPowerDisabled) {
+      if (this.stopped) return 2; // remain halted
+      if (this.sleeping) return 2; // sleep until external wake
+    }
 
+    // Service maskable IRQ before executing next instruction
+    // On SPC700, the I bit disables interrupts when set; service only if I==0
+    if (this.irqPending && (this.PSW & SMP.I) === 0) {
+      // Push return address and PSW, then vector to $FFDE/FFDF
+      const ret = this.PC & 0xffff;
+      const hi = (ret >>> 8) & 0xff;
+      const lo = ret & 0xff;
+      this.push8(hi);
+      this.push8(lo);
+      this.push8(this.PSW & 0xff);
+      // On IRQ entry: set I to disable nesting (do not set B)
+      this.PSW = (this.PSW | SMP.I) & 0xff;
+      const vLo = this.read8(0xffde) & 0xff;
+      const vHi = this.read8(0xffdf) & 0xff;
+      if (this.enableNullVectorIplHle && vLo === 0xff && vHi === 0xff) {
+        // HLE: immediately return from IRQ when vector is null ($FFFF)
+        this.PSW = this.pop8() & 0xff; // restore PSW
+        const retLo = this.pop8() & 0xff;
+        const retHi = this.pop8() & 0xff;
+        this.PC = ((retHi << 8) | retLo) & 0xffff;
+        this.irqPending = false;
+        return 14; // entry (8) + RETI (6)
+      }
+      this.PC = ((vHi << 8) | vLo) & 0xffff;
+      this.irqPending = false;
+      return 8;
+    }
+
+    const fetchPC = this.PC & 0xffff;
     const op = this.read8(this.PC);
     this.PC = (this.PC + 1) & 0xffff;
+
+    // Record into instruction ring if enabled
+    if (this.irSize > 0 && this.irBuf.length > 0) {
+      this.irBuf[this.irPos % this.irBuf.length] = { pc: fetchPC, op: op & 0xff };
+      this.irPos = (this.irPos + 1) % this.irBuf.length;
+    }
 
     switch (op) {
       // NOP
@@ -292,8 +361,8 @@ export class SMP {
         this.setZN8(this.Y);
         return 4;
       }
-      // MOV dp,Y (flags unaffected)
-      case 0xd6: {
+      // MOV dp,Y (flags unaffected) (0xCB per bsnes)
+      case 0xcb: {
         const dp = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
         this.writeDP(dp, this.Y & 0xff);
         return 4;
@@ -452,6 +521,16 @@ export class SMP {
         const v = this.read8(addr) & 0xff;
         this.A = (this.A | v) & 0xff;
         this.setZN8(this.A);
+        return 5;
+      }
+      // OR dp,#imm
+      case 0x18: {
+        const dp = this.read8(this.PC); const imm = this.read8((this.PC + 1) & 0xffff);
+        this.PC = (this.PC + 2) & 0xffff;
+        const m = this.readDP(dp) & 0xff;
+        const r = (m | imm) & 0xff;
+        this.writeDP(dp, r);
+        this.setZN8(r);
         return 5;
       }
       // AND A,#imm
@@ -722,6 +801,44 @@ export class SMP {
         return 5;
       }
 
+      // --- Compare Y with immediate: CPY #imm (opcode 0xAD) ---
+      case 0xad: {
+        const imm = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
+        const y = this.Y & 0xff; const m = imm & 0xff;
+        const r = (y - m) & 0xff;
+        if (y >= m) this.PSW |= SMP.C; else this.PSW &= ~SMP.C;
+        this.setZN8(r);
+        return 2;
+      }
+      // --- Compare direct page bytes: CMP dp,dp (opcode 0x69) ---
+      case 0x69: {
+        const dp1 = this.read8(this.PC); const dp2 = this.read8((this.PC + 1) & 0xffff);
+        this.PC = (this.PC + 2) & 0xffff;
+        const m = this.readDP(dp1) & 0xff; const n = this.readDP(dp2) & 0xff;
+        const r = (m - n) & 0xff;
+        if (m >= n) this.PSW |= SMP.C; else this.PSW &= ~SMP.C;
+        this.setZN8(r);
+        return 5;
+      }
+      // --- Compare X with immediate: CPX #imm (opcode 0xC8) ---
+      case 0xc8: {
+        const imm = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
+        const x = this.X & 0xff; const m = imm & 0xff;
+        const r = (x - m) & 0xff;
+        if (x >= m) this.PSW |= SMP.C; else this.PSW &= ~SMP.C;
+        this.setZN8(r);
+        return 2;
+      }
+      // --- Compare X with direct page: CPX dp (opcode 0xC9) ---
+      case 0xc9: {
+        const dp = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
+        const x = this.X & 0xff; const m = this.readDP(dp) & 0xff;
+        const r = (x - m) & 0xff;
+        if (x >= m) this.PSW |= SMP.C; else this.PSW &= ~SMP.C;
+        this.setZN8(r);
+        return 3;
+      }
+
       // --- Special op: XCN (nibble swap A) ---
       case 0x9f: {
         const hi = (this.A << 4) & 0xf0;
@@ -773,17 +890,27 @@ export class SMP {
         // Update PSW: set B, clear I (others preserved)
         this.PSW = ((this.PSW | SMP.B) & ~SMP.I) & 0xff;
         // Jump to BRK vector at $FFDE/$FFDF (low,high)
-        const vLo = this.read8(0xffde);
-        const vHi = this.read8(0xffdf);
-        this.PC = ((vHi << 8) | vLo) & 0xffff;
+        const vLo = this.read8(0xffde) & 0xff;
+        const vHi = this.read8(0xffdf) & 0xff;
+        const vec = ((vHi << 8) | vLo) & 0xffff;
+        // HLE: if the vector is null (0xFFFF or 0x0000), immediately return from BRK
+        if (this.enableNullVectorIplHle && (vec === 0xffff || vec === 0x0000)) {
+          // Restore PSW and PC
+          this.PSW = this.pop8() & 0xff;
+          const retLo = this.pop8() & 0xff;
+          const retHi = this.pop8() & 0xff;
+          this.PC = ((retHi << 8) | retLo) & 0xffff;
+          return 8; // treat as BRK entry cost only
+        }
+        this.PC = vec;
         return 8;
       }
       case 0xef: { // SLEEP
-        this.sleeping = true;
+        if (!this.lowPowerDisabled) this.sleeping = true;
         return 2;
       }
       case 0xff: { // STOP
-        this.stopped = true;
+        if (!this.lowPowerDisabled) this.stopped = true;
         return 2;
       }
 
@@ -1526,6 +1653,18 @@ export class SMP {
         const lo = this.read8(vec);
         const hi = this.read8((vec + 1) & 0xffff);
         const target = ((hi << 8) | lo) & 0xffff;
+        // HLE: if vector is null (0x0000 or 0xFFFF), emulate a minimal IPL helper when enabled
+        if (this.enableNullVectorIplHle && (target === 0x0000 || target === 0xffff)) {
+          // Minimal helper set tailored for SPC rips that use TCALL to index tables
+          // n==1: A <- Y (common pattern before MOV X,A / MOV A,(X) to read DP[Y])
+          if (n === 0x1) {
+            this.A = this.Y & 0xff;
+            this.setZN8(this.A);
+            return 2;
+          }
+          // Default: treat as no-op
+          return 2;
+        }
         const ret = this.PC & 0xffff;
         this.push8(ret & 0xff);
         this.push8((ret >>> 8) & 0xff);
@@ -1844,8 +1983,10 @@ export class SMP {
           const key = String(op);
           this.unknownOpCounts[key] = (this.unknownOpCounts[key] || 0) + 1;
         }
-        // Treat unknown opcodes as NOP to keep running
-        return 2;
+        // Hard error on unimplemented opcode to preserve hardware-accurate behavior
+        const pcStr = fetchPC.toString(16).padStart(4, '0');
+        const opStr = (op & 0xff).toString(16).padStart(2, '0');
+        throw new Error(`[SMP] Unimplemented opcode 0x${opStr} at PC=0x${pcStr}`);
     }
   }
 }

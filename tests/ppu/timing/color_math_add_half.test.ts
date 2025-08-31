@@ -51,8 +51,8 @@ describe('PPU timing: color math add half (main BG1 + sub BG2)', () => {
     setCGRAM(p, 1, 0x7c00); // red
     setCGRAM(p, 2, 0x03e0); // green
 
-    // CGADSUB: half (bit7=1), add (bit6=0)
-    p.writeReg(CGADSUB, 0x80);
+    // CGADSUB: apply to BG1 (bit0), half (bit7=1), add (bit6=0)
+    p.writeReg(CGADSUB, 0x81);
 
     // Expected: (red + green)/2 = (R=31,G=31,B=0)/2 -> (15,15,0) => 0x3DE0
     expect(p.getPixelRGB15()).toBe(0x3DE0);

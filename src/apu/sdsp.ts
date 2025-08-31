@@ -4,6 +4,8 @@
 export class SDSP {
   private regs = new Uint8Array(128);
   private addr = 0; // 7-bit address latch
+  // ENDX status bits (bit i set when voice i reached END in a block); cleared on read of 0x7F
+  private endxMask = 0;
 
   // Attached ARAM (64 KiB)
   private aram: Uint8Array | null = null;
@@ -43,6 +45,15 @@ export class SDSP {
   private traceMix = false;
   private traceMaxFrames = 0;
   private traceFrames: any[] = [];
+  // Optional decode trace (first N decodeNext events)
+  private decodeTraceMax = 0;
+  private decodeTrace: any[] = [];
+  setDecodeTrace(maxEvents: number) {
+    this.decodeTraceMax = Math.max(0, maxEvents|0);
+    this.decodeTrace = [];
+  }
+  getDecodeTrace(): any[] { return this.decodeTrace.slice(); }
+
   // Guard counters to detect a dead left pipeline while right has signal
   private guardLZero = 0;
   private guardRNonZero = 0;
@@ -181,7 +192,31 @@ export class SDSP {
 
   // APU reads from $F3
   readData(): number {
-    return this.regs[this.addr & 0x7f] & 0xff;
+    const a = this.addr & 0x7f;
+    // ENDX status
+    if (a === 0x7f) {
+      const v = this.endxMask & 0xff;
+      // Reading ENDX clears all bits (acknowledge)
+      this.endxMask = 0;
+      return v;
+    }
+    // Per-voice status mirrors (read-only): ENVX (0x08), OUTX (0x09)
+    const off = a & 0x0f;
+    if (off === 0x08 || off === 0x09) {
+      const vi = (a >>> 4) & 0x07;
+      const v = this.voices[vi];
+      if (off === 0x08) {
+        // ENVX range 0..127
+        const envx = Math.max(0, Math.min(127, Math.round(v.env * 127)));
+        return envx & 0x7f;
+      } else {
+        // OUTX is signed 8-bit; approximate from current sample after envelope
+        const s = Math.max(-32768, Math.min(32767, Math.round((v.h0 | 0) * (v.env || 0))));
+        const out8 = (s >> 8) & 0xff; // take high 8 bits
+        return out8;
+      }
+    }
+    return this.regs[a] & 0xff;
   }
 
   // Mix one sample (stereo), 16-bit ints
@@ -249,7 +284,7 @@ export class SDSP {
       const vl = (s * volL) / 128;
       const vr = (s * volR) / 128;
 
-      if (frameTraceVoices) frameTraceVoices.push({ i, sApprox, env: envVal, s, volL: volL, volR: volR, vl, vr });
+      if (frameTraceVoices) frameTraceVoices.push({ i, pitch: v.pitch|0, step, phase: v.phase, sApprox, env: envVal, s, volL: volL, volR: volR, vl, vr });
 
       dryL += vl;
       dryR += vr;
@@ -387,7 +422,7 @@ export class SDSP {
         v.env -= step;
         if (v.env <= sustainLevel) { v.env = sustainLevel; v.envPhase = 3; }
       } else {
-        // sustain
+        // sustain: approximate linear decay using SR
         const step = (SR + 1) / 8192;
         v.env -= step;
         if (v.env < 0) v.env = 0;
@@ -425,6 +460,11 @@ export class SDSP {
       v.curHeader = header;
       v.brrByteIndex = 1; // next byte after header
       v.samplesRemainingInBlock = 16;
+      if (this.decodeTrace.length < this.decodeTraceMax) {
+        const end = (header & 0x02) !== 0; // BRR END flag is bit1
+        const loop = (header & 0x01) !== 0; // BRR LOOP flag is bit0
+        this.decodeTrace.push({ evt: 'hdr', addr: v.curAddr & 0xffff, hdr: header, end, loop });
+      }
     }
 
     // Read next 4-bit nibble
@@ -461,10 +501,13 @@ export class SDSP {
     v.samplesRemainingInBlock--;
     if (v.samplesRemainingInBlock <= 0) {
       // End of block: advance pointer
-      const end = (v.curHeader & 0x01) !== 0;
+      const end = (v.curHeader & 0x02) !== 0;  // BRR END flag (bit1)
+      const loop = (v.curHeader & 0x01) !== 0; // BRR LOOP flag (bit0)
       if (end) {
-        // On END, jump to sample's loop address if provided; do not depend on header's loop bit
-        if (v.loopAddr !== 0) {
+        // Latch ENDX bit for this voice
+        this.endxMask |= (1 << (v.index & 7));
+        // On END: hardware loops only if LOOP flag is set; otherwise the voice stops
+        if (loop && v.loopAddr !== 0) {
           v.curAddr = v.loopAddr & 0xffff;
         } else {
           v.active = false; // stop
@@ -472,10 +515,17 @@ export class SDSP {
       } else {
         v.curAddr = (v.curAddr + 9) & 0xffff; // 1 header + 8 data bytes
       }
+      if (this.decodeTrace.length < this.decodeTraceMax) {
+        this.decodeTrace.push({ evt: 'blk_end', next: v.curAddr & 0xffff, end, loop });
+      }
     }
 
     // Push into interpolation history
     v.h3 = v.h2; v.h2 = v.h1; v.h1 = v.h0; v.h0 = s | 0;
+
+    if (this.decodeTrace.length < this.decodeTraceMax) {
+      this.decodeTrace.push({ evt: 's', addr: v.curAddr & 0xffff, bidx: v.brrByteIndex, nidx: nibbleIndex, n4, range, f, s, p1: v.prev1, p2: v.prev2 });
+    }
 
     return s | 0;
   }

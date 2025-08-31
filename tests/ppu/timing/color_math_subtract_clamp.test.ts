@@ -48,8 +48,8 @@ describe('PPU timing: color math subtract clamp with fixed color', () => {
     // Set fixed green = 31 via COLDATA (select G with bit6)
     p.writeReg(COLDATA, 0x40 | 31);
 
-    // CGADSUB: use fixed (bit5), subtract (bit6), no half
-    p.writeReg(CGADSUB, 0x60);
+    // CGADSUB: apply to BG1 (bit0), use fixed (bit5), subtract (bit6), no half
+    p.writeReg(CGADSUB, 0x61);
 
     // Expected: green - green = 0
     expect(p.getPixelRGB15()).toBe(0x0000);

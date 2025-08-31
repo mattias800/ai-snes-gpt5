@@ -38,7 +38,10 @@
         Scale
         <input type="number" id="scale" value="3" min="1" max="6" step="1" />
       </label>
-      <label title="Use APU shim to pass handshake and (optionally) unblank">
+      <label title="Enable real APU core (bypasses shim)">
+        <input type="checkbox" id="apuCore" /> APU core
+      </label>
+      <label title="Use APU shim to pass handshake and (optionally) unblank (ignored if APU core enabled)">
         <input type="checkbox" id="shim" checked /> Shim
       </label>
       <label title="Shim performs only handshake (no PPU writes)">
@@ -46,6 +49,18 @@
       </label>
       <label title="Shim injects a test tile/palette after countdown (for quick visuals)">
         <input type="checkbox" id="shimTile" /> Shim tile
+      </label>
+    </div>
+
+    <div class="row">
+      <label title="APU boot-time IPL HLE: CPU<->APU handshake/upload shim">
+        <input type="checkbox" id="apuIplHle" /> APU IPL-HLE
+      </label>
+      <label title="HLE null IRQ vector: if IRQ/BRK vector=$FFFF, do immediate RETI">
+        <input type="checkbox" id="nullIrqIplHle" checked /> Null IRQ IPL-HLE
+      </label>
+      <label title="Rewrite a RETI stub into ARAM when IRQ/BRK vector=$FFFF (SPC loader use)">
+        <input type="checkbox" id="rewriteNullIrq" /> Rewrite null IRQ vector
       </label>
       <button id="resetBtn" disabled>Reset</button>
       <button id="pauseBtn" disabled>Pause</button>

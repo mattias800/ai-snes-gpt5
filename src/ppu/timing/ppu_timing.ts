@@ -86,6 +86,15 @@ export class TimingPPU implements IPPU {
   private coldatag = 0;
   private coldatab = 0;
 
+  // Windowing (scaffold)
+  private w12sel = 0x00;   // $2123 BG1/BG2 window enables (W1/W2 enable/invert pairs)
+  private w34sel = 0x00;   // $2124 BG3/BG4 window enables
+  private wh0 = 0;         // $2126 window1 left
+  private wh1 = 0;         // $2127 window1 right
+  private wh2 = 0;         // $2128 window2 left
+  private wh3 = 0;         // $2129 window2 right
+  private wbglog = 0x00;   // $212A window combination (we treat as OR)
+
   // VRAM port state
   private vmain = 0x00;        // $2115
   private vaddr = 0x0000;      // $2116/$2117 (word address)
@@ -326,6 +335,39 @@ export class TimingPPU implements IPPU {
         this.vmain = v & 0xff;
         break;
       }
+      // W12SEL $2123
+      case 0x23: {
+        this.w12sel = v & 0xff;
+        break;
+      }
+      // WH0/WH1 $2126/$2127
+      case 0x26: {
+        this.wh0 = v & 0xff;
+        break;
+      }
+      case 0x27: {
+        this.wh1 = v & 0xff;
+        break;
+      }
+      // W34SEL $2124
+      case 0x24: {
+        this.w34sel = v & 0xff;
+        break;
+      }
+      // WH2/WH3 $2128/$2129
+      case 0x28: {
+        this.wh2 = v & 0xff;
+        break;
+      }
+      case 0x29: {
+        this.wh3 = v & 0xff;
+        break;
+      }
+      // WBGLOG $212A (we ignore combine mode and treat as OR)
+      case 0x2a: {
+        this.wbglog = v & 0xff;
+        break;
+      }
       // VMADDL/H $2116/$2117
       case 0x16: {
         this.vaddr = (this.vaddr & 0xff00) | v;
@@ -532,6 +574,33 @@ export class TimingPPU implements IPPU {
     return ((r & 0x1f) << 10) | ((g & 0x1f) << 5) | (b & 0x1f);
   };
 
+  private inWindowForLayer = (layer: number, x: number): boolean => {
+    // Determine selector and bit offsets
+    let sel = 0; let base = 0;
+    if (layer === 1) { sel = this.w12sel; base = 0; }
+    else if (layer === 2) { sel = this.w12sel; base = 4; }
+    else if (layer === 3) { sel = this.w34sel; base = 0; }
+    else if (layer === 4) { sel = this.w34sel; base = 4; }
+    else return true;
+
+    const w1e = ((sel >> (base + 0)) & 1) !== 0;
+    const w1i = ((sel >> (base + 1)) & 1) !== 0;
+    const w2e = ((sel >> (base + 2)) & 1) !== 0;
+    const w2i = ((sel >> (base + 3)) & 1) !== 0;
+
+    const inRange = (xl: number, xr: number, px: number): boolean => {
+      return (xl <= xr) ? (px >= xl && px <= xr) : (px >= xl || px <= xr);
+    };
+
+    const px = x & 0xff;
+    let any = false;
+    let inWin = false;
+    if (w1e) { any = true; let v = inRange(this.wh0, this.wh1, px); if (w1i) v = !v; inWin = inWin || v; }
+    if (w2e) { any = true; let v = inRange(this.wh2, this.wh3, px); if (w2i) v = !v; inWin = inWin || v; }
+    if (!any) return true; // if no windows apply, allow math everywhere
+    return inWin;
+  };
+
   // Per-dot pixel with simple priority: choose highest tile priority; tie-breaker by layer order BG1>BG2>BG3>BG4
   getPixelRGB15 = (): number => {
     // Apply pending HOfs at 8-pixel boundaries at the start of the dot
@@ -575,6 +644,16 @@ export class TimingPPU implements IPPU {
     const subEnableBG4 = (this.ts & 0x08) !== 0;
 
     const useFixed = (this.cgadsub & 0x20) !== 0;
+
+    // Per-layer gating: bits 0..3 select BG1..BG4. If none set, default to no math (explicit gating required)
+    const gateMask = this.cgadsub & 0x0f;
+    const gateBit = (bestLayer >= 1 && bestLayer <= 4) ? (1 << (bestLayer - 1)) : 0;
+    const gateOn = (gateMask & gateBit) !== 0;
+
+    // Windowing check for the selected layer
+    if (!this.inWindowForLayer(bestLayer, x)) return bestColor;
+
+    if (!gateOn) return bestColor;
 
     if (this.cgadsub !== 0 && (useFixed || (subEnableBG1 || subEnableBG2 || subEnableBG3 || subEnableBG4))) {
       let subBestColor = 0x0000;
