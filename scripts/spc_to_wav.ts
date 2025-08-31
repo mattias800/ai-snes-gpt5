@@ -37,6 +37,7 @@ interface CliArgs {
   logDspKeys: boolean;
   logDspParams: boolean;
   freezeSmp: boolean;
+  forceKon: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -75,6 +76,7 @@ function parseArgs(argv: string[]): CliArgs {
   const logDspKeys = (args['log-dsp-keys'] ?? '0') === '1';
   const logDspParams = (args['log-dsp-params'] ?? '0') === '1';
   const freezeSmp = (args['freeze-smp'] ?? '0') === '1';
+  const forceKon = ((args['force-kon'] ?? '0') === '1' || (args['force-kon'] ?? '').toLowerCase() === 'auto');
   if (!Number.isFinite(seconds) || seconds <= 0) throw new Error('Invalid --seconds');
   if (!Number.isFinite(rate) || rate <= 0) throw new Error('Invalid --rate');
   if (channels !== 1 && channels !== 2) throw new Error('Invalid --channels (1 or 2)');
@@ -86,7 +88,7 @@ function parseArgs(argv: string[]): CliArgs {
   if (!Number.isFinite(traceMs) || traceMs < 0) throw new Error('Invalid --trace-ms');
   if (!Number.isFinite(traceTimersMs) || traceTimersMs < 0) throw new Error('Invalid --trace-timers-ms');
   if (!Number.isFinite(traceDspIo) || traceDspIo < 0) throw new Error('Invalid --trace-dspio');
-  return { in: inPath, out: outPath, seconds, rate, channels: channels as 1 | 2, allowSilence, gain, prerollMs, mask, forcePan, forcePanMs, nullIrqIplHle, apuIplHle, rewriteNullIrq, traceMs, traceSmp, traceMix, traceIo, timerIrq, dumpInit, traceDecode, traceKon, traceTimersMs, traceDspIo, smpNoLowPower, mapIplRom, logDspKeys, logDspParams, freezeSmp };
+  return { in: inPath, out: outPath, seconds, rate, channels: channels as 1 | 2, allowSilence, gain, prerollMs, mask, forcePan, forcePanMs, nullIrqIplHle, apuIplHle, rewriteNullIrq, traceMs, traceSmp, traceMix, traceIo, timerIrq, dumpInit, traceDecode, traceKon, traceTimersMs, traceDspIo, smpNoLowPower, mapIplRom, logDspKeys, logDspParams, freezeSmp, forceKon };
 }
 
 function writeWavPCM16LE(samples: Int16Array, sampleRate: number, channels: number): Buffer {
@@ -143,6 +145,33 @@ async function main() {
   if (args.forcePan != null && args.forcePanMs > 0) {
     const frames = Math.max(1, Math.round((args.forcePanMs/1000) * args.rate));
     apu.setForcePan(args.forcePan, frames);
+  }
+
+  // Optional: force key-on for voices that look active in the snapshot (helps SPC rips that never KON)
+  if (args.forceKon) {
+    try {
+      const anyApu: any = apu as any;
+      const dsp: any = anyApu['dsp'];
+      const regs: Uint8Array | undefined = dsp?.['regs'];
+      if (regs) {
+        let mask = 0;
+        for (let v = 0; v < 8; v++) {
+          const base = (v << 4) & 0x7f;
+          const vl = (regs[(base + 0x00) & 0x7f] << 24) >> 24;
+          const vr = (regs[(base + 0x01) & 0x7f] << 24) >> 24;
+          const pitch = (((regs[(base + 0x03) & 0x7f] & 0x3f) << 8) | (regs[(base + 0x02) & 0x7f] & 0xff)) & 0x3fff;
+          const srcn = regs[(base + 0x04) & 0x7f] & 0xff;
+          const likelyActive = (srcn !== 0 && pitch !== 0) || (vl !== 0 || vr !== 0);
+          if (likelyActive) mask |= (1 << v);
+        }
+        if (mask !== 0) {
+          dsp.writeAddr(0x4c); dsp.writeData(mask & 0xff);
+          console.log(`[FORCE-KON] Wrote KON mask=${(mask&0xff).toString(16).padStart(2,'0')}`);
+        } else {
+          console.log(`[FORCE-KON] No active voices detected from snapshot; skipping KON.`);
+        }
+      }
+    } catch {}
   }
 
   // Optional initial dump of CPU state and memory near vectors and PC

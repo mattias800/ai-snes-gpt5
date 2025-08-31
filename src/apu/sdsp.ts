@@ -182,6 +182,15 @@ export class SDSP {
     const loop = this.readWord((base + 2) & 0xffff);
     v.startAddr = start & 0xffff;
     v.loopAddr = loop & 0xffff;
+    // Fallback: some SPC snapshots have START block flagged END. Start from LOOP if valid.
+    try {
+      const hdr = this.aram[v.startAddr & 0xffff] & 0xff;
+      const endFlag = (hdr & 0x02) !== 0;
+      const loopValid = (v.loopAddr & 0xffff) !== 0;
+      if (endFlag && loopValid) {
+        v.startAddr = v.loopAddr & 0xffff;
+      }
+    } catch {}
     v.startKeyOn();
   }
 
