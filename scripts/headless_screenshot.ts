@@ -98,6 +98,17 @@ async function main() {
     const cPairs = cgram ? new Uint16Array(cgram.buffer, cgram.byteOffset, Math.floor(cgram.byteLength / 2)) : undefined;
     cCount = cPairs ? countNonZeroWords(cPairs) : -1;
     console.log(`[screenshot][debug] PPU: forceBlank=${ppu.forceBlank} brightness=${ppu.brightness} tm=0x${(ppu.tm ?? 0).toString(16)} ts=0x${(ppu.ts ?? 0).toString(16)} cgadsub=0x${(ppu.cgadsub ?? 0).toString(16)} cgwsel=0x${(ppu.cgwsel ?? 0).toString(16)} vramNonZeroWords=${vCount} cgramNonZeroWords=${cCount}`);
+    // Optional tilemap dump around 0x0021 (where the ROM writes header text)
+    try {
+      const base = 0x0020;
+      const words: number[] = [];
+      for (let i = 0; i < 16; i++) {
+        const w = ppu.inspectVRAMWord((base + i) & 0x7fff) & 0xffff;
+        words.push(w);
+      }
+      console.log(`[screenshot][debug] VRAM[0x${base.toString(16)}..] = ${words.map(w=>`0x${w.toString(16).padStart(4,'0')}`).join(' ')}`);
+      console.log(`[screenshot][debug] BG1 mapBaseWord=0x${(ppu.bg1MapBaseWord||0).toString(16)} charBaseWord=0x${(ppu.bg1CharBaseWord||0).toString(16)} bgMode=${ppu.bgMode}`);
+    } catch {}
   }
 
   if (forceUnblank) {

@@ -361,8 +361,8 @@ export class SMP {
         this.setZN8(this.Y);
         return 4;
       }
-      // MOV dp,Y (flags unaffected) (0xCB per bsnes)
-      case 0xcb: {
+      // MOV dp,Y (flags unaffected) — canonical encoding 0xD6
+      case 0xd6: {
         const dp = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
         this.writeDP(dp, this.Y & 0xff);
         return 4;

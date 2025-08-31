@@ -202,10 +202,9 @@ export class SDSP {
   // APU reads from $F3
   readData(): number {
     const a = this.addr & 0x7f;
-    // ENDX status
+    // Hardware: 0x7F returns ENDX latch and clears it
     if (a === 0x7f) {
       const v = this.endxMask & 0xff;
-      // Reading ENDX clears all bits (acknowledge)
       this.endxMask = 0;
       return v;
     }

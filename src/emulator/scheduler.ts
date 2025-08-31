@@ -89,14 +89,18 @@ export class Scheduler {
       busAny.stepApuScanline();
     }
 
-    // Detect VBlank start transition (223 -> 224) and pulse NMI once per frame
-    if (prevScanline === 223 && ppu.scanline === 224 && this.emu.bus.isNMIEnabled && this.emu.bus.isNMIEnabled()) {
+    // Detect VBlank start transition (223 -> 224) and set RDNMI latch every frame.
+    // Always pulse the bus latch so $4210 bit7 toggles regardless of NMI enable.
+    if (prevScanline === 223 && ppu.scanline === 224) {
       if (!this.nmiFiredThisFrame) {
         if (typeof (this.emu.bus as any).pulseNMI === 'function') {
           (this.emu.bus as any).pulseNMI();
         }
-        if (typeof (this.emu.cpu as any).nmi === 'function') {
-          (this.emu.cpu as any).nmi();
+        // Only deliver CPU NMI if enabled
+        if (this.emu.bus.isNMIEnabled && this.emu.bus.isNMIEnabled()) {
+          if (typeof (this.emu.cpu as any).nmi === 'function') {
+            (this.emu.cpu as any).nmi();
+          }
         }
         this.nmiFiredThisFrame = true;
       }

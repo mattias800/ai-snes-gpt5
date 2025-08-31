@@ -122,7 +122,7 @@ export class PPU {
     }
   }
   private incOnHigh(): boolean {
-    // If bit7 = 1 -> increment after high; if 0 -> increment after low
+    // Hardware semantics: VMAIN bit7 = 1 -> increment after HIGH byte ($2119); bit7 = 0 -> increment after LOW byte ($2118)
     return (this.vmain & 0x80) !== 0;
   }
   private incVAddr(): void {
@@ -251,17 +251,17 @@ export class PPU {
         break;
       }
       case 0x0b: { // BG12NBA ($210B)
-        // Hardware mapping: BG1 = low nibble, BG2 = high nibble
-        // Scale: nibble selects base in units of 0x1000 bytes => 0x0800 words
-        this.bg1CharBaseWord = (v & 0x0f) << 11;
-        this.bg2CharBaseWord = ((v >> 4) & 0x0f) << 11;
+        // Hardware mapping: BG1 = LOW nibble, BG2 = HIGH nibble
+        // Scale: nibble selects base in units of 0x2000 bytes => 0x1000 words
+        this.bg1CharBaseWord = (v & 0x0f) << 12;
+        this.bg2CharBaseWord = ((v >> 4) & 0x0f) << 12;
         break;
       }
       case 0x0c: { // BG34NBA ($210C)
-        // Hardware mapping: BG3 = low nibble, BG4 = high nibble
-        // Scale: nibble selects base in units of 0x1000 bytes => 0x0800 words
-        this.bg3CharBaseWord = (v & 0x0f) << 11;
-        this.bg4CharBaseWord = ((v >> 4) & 0x0f) << 11;
+        // Hardware mapping: BG3 = LOW nibble, BG4 = HIGH nibble
+        // Scale: nibble selects base in units of 0x2000 bytes => 0x1000 words
+        this.bg3CharBaseWord = (v & 0x0f) << 12;
+        this.bg4CharBaseWord = ((v >> 4) & 0x0f) << 12;
         break;
       }
       case 0x05: { // BGMODE ($2105)

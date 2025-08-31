@@ -171,6 +171,47 @@ async function bootFromRomBytes(bytes: Uint8Array) {
 
   emu = _emu; sched = _sched;
 
+  // Expose emulator for console-based debugging hooks
+  try {
+    (window as any).emu = emu;
+    (window as any).forceUnblank = () => {
+      if (!emu) return;
+      const ppu = emu.bus.getPPU();
+      // Unblank and enable BG1
+      ppu.writeReg(0x00, 0x0f); // INIDISP full brightness
+      ppu.writeReg(0x2c, 0x01); // TM: enable BG1 on main
+      // Configure BG1 map/char bases
+      ppu.writeReg(0x07, 0x00); // BG1SC: map base 0x0000, 32x32
+      ppu.writeReg(0x0b, 0x10); // BG12NBA: BG1 char base nibble=1 -> 0x0800 words
+      ppu.writeReg(0x15, 0x00); // VMAIN: +1 word after high
+      // Write a red 4bpp tile at tile index 1 in char base 0x0800
+      const tileBaseWord = 0x0800;
+      const tile1WordBase = tileBaseWord + 16; // 16 words per 4bpp tile
+      for (let y = 0; y < 8; y++) {
+        ppu.writeReg(0x16, (tile1WordBase + y) & 0xff);
+        ppu.writeReg(0x17, ((tile1WordBase + y) >>> 8) & 0xff);
+        ppu.writeReg(0x18, 0xff);
+        ppu.writeReg(0x19, 0x00);
+      }
+      for (let y = 0; y < 8; y++) {
+        const addr = tile1WordBase + 8 + y;
+        ppu.writeReg(0x16, addr & 0xff);
+        ppu.writeReg(0x17, (addr >>> 8) & 0xff);
+        ppu.writeReg(0x18, 0x00);
+        ppu.writeReg(0x19, 0x00);
+      }
+      // Tilemap (0,0) -> tile 1
+      ppu.writeReg(0x16, 0x00);
+      ppu.writeReg(0x17, 0x00);
+      ppu.writeReg(0x18, 0x01);
+      ppu.writeReg(0x19, 0x00);
+      // CGRAM palette index 1 = red max
+      ppu.writeReg(0x21, 0x02);
+      ppu.writeReg(0x22, 0x00);
+      ppu.writeReg(0x22, 0x7c);
+    };
+  } catch { /* ignore */ }
+
   // Start loop
   running = true;
   setCanvasScale();
