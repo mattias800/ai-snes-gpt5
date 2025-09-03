@@ -299,7 +299,11 @@ const runVector = (v: CpuVector): void => {
     };
     if (eff16 !== null) {
       if (mode === 'indX') {
-        const dp = (v.operands as any).dp ?? 0; const dpPrime = ((dp + Xlow) & 0xff) >>> 0; if (!pointerPresentDP(Dbase, dpPrime)) writePtr16DP(Dbase, dpPrime, eff16);
+        const dp = (v.operands as any).dp ?? 0;
+        // Use full X value when x8 is false (X flag clear in native mode)
+        const xValue = x8 ? (cpu.state.X & 0xff) : (cpu.state.X & 0xffff);
+        const base = (Dbase + dp + xValue) & 0xffff;
+        if (!pointerPresent(base, false)) writePtr16(base, eff16);
       } else if (mode === 'ind' || mode === 'indY') {
         const dp = (v.operands as any).dp ?? 0; if (!pointerPresentDP(Dbase, dp)) writePtr16DP(Dbase, dp, eff16);
       } else if (mode === 'longInd' || mode === 'longIndY') {

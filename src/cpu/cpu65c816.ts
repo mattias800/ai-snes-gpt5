@@ -223,7 +223,9 @@ export class CPU65C816 {
   private dpPtr16(off8: number): Word {
     // (dp) 16-bit pointer fetch.
     // Native (E=0): tests expect linear 16-bit addressing for the pointer table: base = D + dp, hi at base+1.
-    // Emulation (E=1): wrap within the direct-page bank anchored by D.high (page semantics), i.e., (D & 0xFF00) | ((D.low + dp) & 0xFF).
+    // Emulation (E=1): Complex behavior based on test vectors:
+    //   - When DL (low byte of D) is 00 and dp=$FF, wrap within the page (e.g., $01FF -> $0100)
+    //   - Otherwise, use linear addressing (e.g., $01FE -> $01FF -> $0200)
     const D = this.state.D & 0xffff;
     let loAddr: number;
     let hiAddr: number;
@@ -232,10 +234,19 @@ export class CPU65C816 {
       loAddr = base;
       hiAddr = (base + 1) & 0xffff;
     } else {
-      const baseHigh = D & 0xff00;
-      const sumLow = ((D & 0xff) + (off8 & 0xff)) & 0xff;
-      loAddr = (baseHigh | sumLow) & 0xffff;
-      hiAddr = (baseHigh | ((sumLow + 1) & 0xff)) & 0xffff;
+      // Emulation mode: special case for DL=00 and dp=$FF
+      const DL = D & 0xff;
+      const dp = off8 & 0xff;
+      if (DL === 0x00 && dp === 0xFF) {
+        // When D=$xx00 and dp=$FF, wrap within the page
+        loAddr = (D + dp) & 0xffff;  // $xxFF
+        hiAddr = (D & 0xff00) & 0xffff;  // $xx00
+      } else {
+        // Otherwise use linear addressing
+        const base = (D + dp) & 0xffff;
+        loAddr = base;
+        hiAddr = (base + 1) & 0xffff;
+      }
     }
     const lo = this.read8(0x00, loAddr as Word);
     const hi = this.read8(0x00, hiAddr as Word);

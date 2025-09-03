@@ -107,7 +107,12 @@ runIf('Third-party snes-tests: CPU vectors (ALU subset; data-gated)', () => {
       }
 
       // Initial memory writes
-      for (const m of v.memInit) bus.write8(m.addr24, m.val);
+      for (const m of v.memInit) {
+        if (v.idHex === '0034' || v.idHex === '0035') {
+          console.log(`[TEST ${v.idHex}] Writing ${m.val.toString(16).padStart(2,'0')} to ${m.addr24.toString(16).padStart(6,'0')}`);
+        }
+        bus.write8(m.addr24, m.val);
+      }
 
       // Emulation-mode memInit fixups for DP and SR addressing
       // The vectors often seed bytes at D+dp (native-style) or S+sr, even when E=1.
@@ -406,8 +411,12 @@ runIf('Third-party snes-tests: CPU vectors (ALU subset; data-gated)', () => {
       if (eff16 !== null) {
         if (mode === 'indX') {
           const dp = (v.operands as any).dp ?? 0;
-          const dpPrime = ((dp + Xlow) & 0xff) >>> 0;
-          if (!pointerPresentDP(Dbase, dpPrime)) writePtr16DP(Dbase, dpPrime, eff16);
+          // Use full X value when x8 is false (X flag clear in native mode)
+          // The pointer address is calculated as (D + dp + X) & 0xffff
+          const xValue = x8 ? (cpu.state.X & 0xff) : (cpu.state.X & 0xffff);
+          const base = (Dbase + dp + xValue) & 0xffff;
+          // Write pointer at the calculated base address
+          if (!pointerPresent(base, false)) writePtr16(base, eff16);
         } else if (mode === 'ind' || mode === 'indY') {
           const dp = (v.operands as any).dp ?? 0;
           if (!pointerPresentDP(Dbase, dp)) writePtr16DP(Dbase, dp, eff16);
