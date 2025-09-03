@@ -221,19 +221,27 @@ export class CPU65C816 {
     return (D + (off8 & 0xff)) & 0xffff;
   }
   private dpPtr16(off8: number): Word {
-    // (dp) 16-bit pointer fetch (wrapping within the direct page):
-    // - Base uses the Direct Page register D for the pointer table in both modes.
-    // - Addressing is confined to the 256-byte page anchored by D.high: eff = (D & 0xFF00) | ((D.low + off8) & 0xFF)
+    // (dp) 16-bit pointer fetch.
+    // Native (E=0): tests expect linear 16-bit addressing for the pointer table: base = D + dp, hi at base+1.
+    // Emulation (E=1): wrap within the direct-page bank anchored by D.high (page semantics), i.e., (D & 0xFF00) | ((D.low + dp) & 0xFF).
     const D = this.state.D & 0xffff;
-    const baseHigh = D & 0xff00;
-    const sumLow = ((D & 0xff) + (off8 & 0xff)) & 0xff;
-    const loAddr = (baseHigh | sumLow) & 0xffff;
-    const hiAddr = (baseHigh | ((sumLow + 1) & 0xff)) & 0xffff;
-    const lo = this.read8(0x00, loAddr);
-    const hi = this.read8(0x00, hiAddr);
+    let loAddr: number;
+    let hiAddr: number;
+    if (!this.state.E) {
+      const base = (D + (off8 & 0xff)) & 0xffff;
+      loAddr = base;
+      hiAddr = (base + 1) & 0xffff;
+    } else {
+      const baseHigh = D & 0xff00;
+      const sumLow = ((D & 0xff) + (off8 & 0xff)) & 0xff;
+      loAddr = (baseHigh | sumLow) & 0xffff;
+      hiAddr = (baseHigh | ((sumLow + 1) & 0xff)) & 0xffff;
+    }
+    const lo = this.read8(0x00, loAddr as Word);
+    const hi = this.read8(0x00, hiAddr as Word);
     const ptr = ((hi << 8) | lo) & 0xffff;
     if (this.debugEnabled) {
-      this.dbg(`[dpPtr16] D=$${D.toString(16).padStart(4,'0')} off=$${(off8 & 0xff).toString(16).padStart(2,'0')} loAddr=$${loAddr.toString(16).padStart(4,'0')} hiAddr=$${hiAddr.toString(16).padStart(4,'0')} lo=$${lo.toString(16).padStart(2,'0')} hi=$${hi.toString(16).padStart(2,'0')} -> ptr=$${ptr.toString(16).padStart(4,'0')}`);
+      this.dbg(`[dpPtr16] E=${this.state.E?1:0} D=$${D.toString(16).padStart(4,'0')} off=$${(off8 & 0xff).toString(16).padStart(2,'0')} loAddr=$${loAddr.toString(16).padStart(4,'0')} hiAddr=$${hiAddr.toString(16).padStart(4,'0')} lo=$${lo.toString(16).padStart(2,'0')} hi=$${hi.toString(16).padStart(2,'0')} -> ptr=$${ptr.toString(16).padStart(4,'0')}`);
     }
     return ptr;
   }
@@ -254,27 +262,25 @@ export class CPU65C816 {
 
   private dpXPtr16(dp8: number): Word {
     // (dp,X) 16-bit pointer fetch with mode-specific wrap semantics.
-    // - Native (E=0): dp+X wraps to 8 bits before adding to D; high byte wraps within the same 256-byte page.
-    // - Emulation (E=1):
-    //     Low byte address uses a 9-bit sum: D + (dp + X) (0..0x1FE)
-    //     High byte address normally uses 9-bit carry (lo+1), BUT when the low address ends on $xxFF,
-    //     hardware exhibits "undocumented" behavior: the high byte is fetched using 8-bit wrap based on (dp+X+1)&$FF.
+    // - Native (E=0): tests expect the pointer address to be calculated as: base = (D + dp + X) & 0xFFFF
+    //                 where X is the full 16-bit X register value when X flag is clear.
+    // - Emulation (E=1): nuanced wrap behavior per cputest README; see comments below.
     const D = this.state.D & 0xffff;
     const dp = dp8 & 0xff;
     const xLow = this.state.X & 0xff;
 
     if (!this.state.E) {
-      // Native mode: classic 8-bit pre-index wrap confined within the D.page (D.high)
-      const prime = (dp + xLow) & 0xff;
-      const baseHigh = D & 0xff00;
-      const sumLow = ((D & 0xff) + prime) & 0xff;
-      const loAddr = (baseHigh | sumLow) & 0xffff;
-      const hiAddr = (baseHigh | ((sumLow + 1) & 0xff)) & 0xffff;
+      // Native mode expectation from test suite: use full X register if X flag is clear.
+      // Base is (D + dp + X) & 0xFFFF where X is either 8-bit (if X flag set) or 16-bit (if X flag clear).
+      const xValue = this.x8 ? (this.state.X & 0xff) : (this.state.X & 0xffff);
+      const base = (D + dp + xValue) & 0xffff;
+      const loAddr = base;
+      const hiAddr = (base + 1) & 0xffff;
       const lo = this.read8(0x00, loAddr as Word);
       const hi = this.read8(0x00, hiAddr as Word);
       const ptr = ((hi << 8) | lo) & 0xffff;
       if (this.debugEnabled) {
-        this.dbg(`[dpXPtr16.E=0] D=$${D.toString(16).padStart(4,'0')} dp=$${dp.toString(16).padStart(2,'0')} Xlow=$${xLow.toString(16).padStart(2,'0')} loAddr=$${loAddr.toString(16).padStart(4,'0')} hiAddr=$${hiAddr.toString(16).padStart(4,'0')} -> ptr=$${ptr.toString(16).padStart(4,'0')}`);
+        this.dbg(`[dpXPtr16.E=0] D=$${D.toString(16).padStart(4,'0')} dp=$${dp.toString(16).padStart(2,'0')} Xlow=$${xLow.toString(16).padStart(2,'0')} base=$${base.toString(16).padStart(4,'0')} -> ptr=$${ptr.toString(16).padStart(4,'0')}`);
       }
       return ptr;
     }
