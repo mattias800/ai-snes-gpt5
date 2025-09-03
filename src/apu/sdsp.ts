@@ -182,15 +182,8 @@ export class SDSP {
     const loop = this.readWord((base + 2) & 0xffff);
     v.startAddr = start & 0xffff;
     v.loopAddr = loop & 0xffff;
-    // Fallback: some SPC snapshots have START block flagged END. Start from LOOP if valid.
-    try {
-      const hdr = this.aram[v.startAddr & 0xffff] & 0xff;
-      const endFlag = (hdr & 0x02) !== 0;
-      const loopValid = (v.loopAddr & 0xffff) !== 0;
-      if (endFlag && loopValid) {
-        v.startAddr = v.loopAddr & 0xffff;
-      }
-    } catch {}
+    // Note: Some samples start with a header that has END flag set.
+    // This is normal - they'll decode 16 samples then jump to loop.
     v.startKeyOn();
   }
 
@@ -469,8 +462,8 @@ export class SDSP {
       v.brrByteIndex = 1; // next byte after header
       v.samplesRemainingInBlock = 16;
       if (this.decodeTrace.length < this.decodeTraceMax) {
-        const end = (header & 0x02) !== 0; // BRR END flag is bit1
-        const loop = (header & 0x01) !== 0; // BRR LOOP flag is bit0
+        const end = (header & 0x01) !== 0;  // BRR END flag is bit0
+        const loop = (header & 0x02) !== 0; // BRR LOOP flag is bit1
         this.decodeTrace.push({ evt: 'hdr', addr: v.curAddr & 0xffff, hdr: header, end, loop });
       }
     }
@@ -509,8 +502,8 @@ export class SDSP {
     v.samplesRemainingInBlock--;
     if (v.samplesRemainingInBlock <= 0) {
       // End of block: advance pointer
-      const end = (v.curHeader & 0x02) !== 0;  // BRR END flag (bit1)
-      const loop = (v.curHeader & 0x01) !== 0; // BRR LOOP flag (bit0)
+      const end = (v.curHeader & 0x01) !== 0;  // BRR END flag (bit0)
+      const loop = (v.curHeader & 0x02) !== 0; // BRR LOOP flag (bit1)
       if (end) {
         // Latch ENDX bit for this voice
         this.endxMask |= (1 << (v.index & 7));
