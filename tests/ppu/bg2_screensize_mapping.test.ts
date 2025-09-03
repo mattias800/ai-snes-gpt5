@@ -19,7 +19,7 @@ describe('BG2 screen size mapping (64x32 and 32x64)', () => {
 
     // Set BG2 screen size to 64x64 (size=3) to test both width/height flags, char base 0x1000
     w8(bus, mmio(0x08), 0x03); // BG2SC size=3
-    w8(bus, mmio(0x0b), 0x02); // BG2 char base words 0x1000
+    w8(bus, mmio(0x0b), 0x11); // BG1 char base 0x1000, BG2 char base 0x1000
 
     // Prepare tile 0 (all pixels value 1) and tile 1 (all pixels 0)
     const base = 0x1000;
@@ -66,10 +66,32 @@ describe('BG2 screen size mapping (64x32 and 32x64)', () => {
       return idx[0];
     }
 
-    expect(sampleAtTile(16, 16)).toBe(1); // TL -> ones
-    expect(sampleAtTile(48, 16)).toBe(0); // TR -> zeros (crossed +0x400)
-    expect(sampleAtTile(16, 48)).toBe(0); // BL -> zeros (crossed +0x800)
-    expect(sampleAtTile(48, 48)).toBe(1); // BR -> ones (crossed +0xC00)
+    console.log('BG2 screensize debug:');
+    console.log('  BG2 map base:', ppu.bg2MapBaseWord.toString(16));
+    console.log('  BG2 char base:', ppu.bg2CharBaseWord.toString(16));
+    console.log('  BG2 width64:', ppu.bg2MapWidth64, 'height64:', ppu.bg2MapHeight64);
+    console.log('  bgMode:', ppu.bgMode);
+    
+    const tl = sampleAtTile(16, 16);
+    const tr = sampleAtTile(48, 16);
+    const bl = sampleAtTile(16, 48);
+    const br = sampleAtTile(48, 48);
+    
+    console.log('  Sample TL (16,16):', tl);
+    console.log('  Sample TR (48,16):', tr);
+    console.log('  Sample BL (16,48):', bl);
+    console.log('  Sample BR (48,48):', br);
+    
+    // Check what's at the tilemap locations
+    console.log('  Tilemap at 0x0:', ppu.inspectVRAMWord(0).toString(16));
+    console.log('  Tilemap at 0x400:', ppu.inspectVRAMWord(0x400).toString(16));
+    console.log('  Tilemap at 0x800:', ppu.inspectVRAMWord(0x800).toString(16));
+    console.log('  Tilemap at 0xc00:', ppu.inspectVRAMWord(0xc00).toString(16));
+    
+    expect(tl).toBe(1); // TL -> ones
+    expect(tr).toBe(0); // TR -> zeros (crossed +0x400)
+    expect(bl).toBe(0); // BL -> zeros (crossed +0x800)
+    expect(br).toBe(1); // BR -> ones (crossed +0xC00)
   });
 });
 

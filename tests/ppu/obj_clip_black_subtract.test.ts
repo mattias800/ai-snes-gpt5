@@ -29,6 +29,8 @@ describe('OBJ clip-to-black with subtract mode', () => {
     const ppu = bus.getPPU();
     // Brightness
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     // OBJ main, BG2 subscreen
     w8(bus, mmio(0x2c), 0x10);
     w8(bus, mmio(0x2d), 0x02);
@@ -40,7 +42,7 @@ describe('OBJ clip-to-black with subtract mode', () => {
     w8(bus, mmio(0x04), 0x00); w8(bus, mmio(0x04), 0x00); w8(bus, mmio(0x04), 0x01); w8(bus, mmio(0x04), 0x00);
 
     // BG2: green on subscreen
-    w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x0b), 0x11);
     w8(bus, mmio(0x08), 0x00);
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x04);
 

@@ -19,6 +19,8 @@ describe.skip('OBJ groundwork: color math with OBJ main', () => {
 
     // For now, just assert renderer returns something and this is a placeholder for when OBJ is supported.
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     w8(bus, mmio(0x2c), 0x10); // TM bit4 = OBJ
     w8(bus, mmio(0x31), 0x60 | 0x10); // enable+half, mask selects OBJ (bit4)
 

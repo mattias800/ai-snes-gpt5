@@ -29,6 +29,8 @@ describe('OBJ: clip-to-black + fixed-color subtract-half', () => {
     const ppu = bus.getPPU();
     // Brightness
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     // OBJ main only (no subscreen layers)
     w8(bus, mmio(0x2c), 0x10);
     w8(bus, mmio(0x2d), 0x00);

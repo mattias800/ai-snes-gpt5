@@ -32,6 +32,8 @@ describe('Color math masks (per-layer selection)', () => {
   function setupCommon(bus: SNESBus) {
     // Full brightness
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     // BG1 map base 0x0000, BG2 map base 0x0400 bytes (word 0x0200)
     w8(bus, mmio(0x07), 0x00);
     w8(bus, mmio(0x08), 0x04);

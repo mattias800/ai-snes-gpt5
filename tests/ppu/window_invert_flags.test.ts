@@ -34,11 +34,13 @@ describe('Per-layer window invert flags (simplified mapping)', () => {
     const bus = mkBus();
     const ppu = bus.getPPU();
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     // Main BG1, Sub BG2
     w8(bus, mmio(0x2c), 0x01);
     w8(bus, mmio(0x2d), 0x02);
     // Bases
-    w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x0b), 0x11);
     w8(bus, mmio(0x08), 0x04);
     setupTiles(bus);
     // Palettes: BG1 red, BG2 green
@@ -66,9 +68,11 @@ describe('Per-layer window invert flags (simplified mapping)', () => {
     const bus = mkBus();
     const ppu = bus.getPPU();
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     w8(bus, mmio(0x2c), 0x01); // BG1 main
     w8(bus, mmio(0x2d), 0x02); // BG2 sub
-    w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x0b), 0x11);
     w8(bus, mmio(0x08), 0x04);
     setupTiles(bus);
     w8(bus, mmio(0x21), 2); w8(bus, mmio(0x22), 0x00); w8(bus, mmio(0x22), 0x7c);

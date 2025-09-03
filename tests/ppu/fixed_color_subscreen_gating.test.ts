@@ -16,6 +16,8 @@ describe('Subscreen fixed color gating with window masks over backdrop sub', () 
   function setupBG1Red_OBJoff(bus: SNESBus) {
     const ppu = bus.getPPU();
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     // BG1 main
     w8(bus, mmio(0x2c), 0x01);
     // No subscreen layers -> backdrop subscreen

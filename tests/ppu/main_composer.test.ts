@@ -19,6 +19,8 @@ describe('Main screen composer: BG1 over BG2 (simplified)', () => {
 
     // Full brightness
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
 
     // Enable BG1 and BG2 on TM
     w8(bus, mmio(0x2c), 0x03);

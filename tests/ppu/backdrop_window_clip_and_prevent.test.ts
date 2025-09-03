@@ -13,15 +13,15 @@ function mkBus() {
 }
 
 function writeSolid(bus: SNESBus) {
+  // Mode 0 uses 2bpp tiles - write tile 1 at VRAM word address 0x0008
   for (let y = 0; y < 8; y++) {
-    w8(bus, mmio(0x16), (0x1000 + 16 + y) & 0xff);
-    w8(bus, mmio(0x17), ((0x1000 + 16 + y) >>> 8) & 0xff);
-    w8(bus, mmio(0x18), 0xff);
-    w8(bus, mmio(0x19), 0x00);
-    w8(bus, mmio(0x16), (0x1000 + 16 + 8 + y) & 0xff);
-    w8(bus, mmio(0x17), ((0x1000 + 16 + 8 + y) >>> 8) & 0xff);
-    w8(bus, mmio(0x18), 0x00);
-    w8(bus, mmio(0x19), 0x00);
+    // For 2bpp: write plane 0 (bit 0) and plane 1 (bit 1) in a single word
+    // Low byte = plane 0 (all pixels have bit 0 set for value 1)
+    // High byte = plane 1 (all zeros)
+    w8(bus, mmio(0x16), (0x0008 + y) & 0xff);
+    w8(bus, mmio(0x17), ((0x0008 + y) >>> 8) & 0xff);
+    w8(bus, mmio(0x18), 0xff); // Plane 0: all pixels have bit 0 set
+    w8(bus, mmio(0x19), 0x00); // Plane 1: all zeros
   }
 }
 

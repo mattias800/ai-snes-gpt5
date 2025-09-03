@@ -19,6 +19,8 @@ describe('Subscreen + per-layer color math masks (simplified)', () => {
 
     // Full brightness
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
 
     // BG1 on main (TM bit0), BG2 on subscreen (TS bit1)
     w8(bus, mmio(0x2c), 0x01);
@@ -27,7 +29,7 @@ describe('Subscreen + per-layer color math masks (simplified)', () => {
     // BG1 char base 0x1000, tile1 solid (pix=1), map at 0
     w8(bus, mmio(0x07), 0x00);
     // Set BG1 and BG2 char bases to 0x1000 so both layers use the same tile graphics
-    w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x0b), 0x11);
     for (let y = 0; y < 8; y++) {
       w8(bus, mmio(0x16), (0x1000 + 16 + y) & 0xff);
       w8(bus, mmio(0x17), ((0x1000 + 16 + y) >>> 8) & 0xff);

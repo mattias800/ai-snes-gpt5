@@ -32,6 +32,8 @@ describe('OBJ priority and flip handling (minimal)', () => {
     const bus = mkBus();
     const ppu = bus.getPPU();
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     // OBJ char base 0x1000
     w8(bus, mmio(0x01), 0x02);
     // Two tiles: 1 (red), 2 (green)
@@ -73,6 +75,8 @@ describe('OBJ priority and flip handling (minimal)', () => {
     const bus = mkBus();
     const ppu = bus.getPPU();
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     w8(bus, mmio(0x01), 0x02);
 
     // Create a tile with left half solid (plane0=0xF0), right half zero

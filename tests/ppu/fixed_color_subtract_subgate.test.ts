@@ -27,6 +27,8 @@ describe('Subtract mode with fixed-color subscreen and subGate toggles', () => {
   function setupWhiteMain_GreenSub(bus: SNESBus) {
     const ppu = bus.getPPU();
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     // BG1 main, BG2 subscreen
     w8(bus, mmio(0x2c), 0x01);
     w8(bus, mmio(0x2d), 0x02);
@@ -34,7 +36,7 @@ describe('Subtract mode with fixed-color subscreen and subGate toggles', () => {
     // BG1/BG2 char/map
     w8(bus, mmio(0x07), 0x00);
     w8(bus, mmio(0x08), 0x04);
-    w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x0b), 0x11);
 
     writeSolid4bpp(bus);
 

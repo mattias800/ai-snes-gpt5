@@ -19,6 +19,8 @@ describe('Main composer with per-tile priority (BG2 high over BG1 low)', () => {
 
     // Full brightness, enable BG1 and BG2
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     w8(bus, mmio(0x2c), 0x03);
 
     // BG1: map base 0, char base 0x1000; tile 1 solid, low priority (bit13=0)

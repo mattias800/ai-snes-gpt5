@@ -503,7 +503,7 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
     // Apply color math only if globally enabled and the main layer is selected by mask
     // Note: mask==0 semantics depend on strictMask flag.
     function layerSelected(lid: number): boolean {
-      // Backdrop (layer 0) cannot be selected by mask bits, only by mask=0 in strict mode
+      // Backdrop (layer 0) cannot be selected by mask bits individually
       if (lid === 0) return false;
       return (lid === 1 && (mask & 0x01) !== 0) ||
              (lid === 2 && (mask & 0x02) !== 0) ||

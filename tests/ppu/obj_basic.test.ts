@@ -31,6 +31,8 @@ describe('OBJ rendering (minimal)', () => {
     const bus = mkBus();
     const ppu = bus.getPPU();
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     // OBJ char base 0x1000
     w8(bus, mmio(0x01), 0x02);
     writeSolid4bppTile(bus);

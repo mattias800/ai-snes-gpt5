@@ -14,6 +14,7 @@ function mkBus() {
 
 describe('Windowed color math (simplified)', () => {
   function writeSolidTile(bus: SNESBus) {
+    // Write tiles at char base 0x1000 (tile 1 at 0x1010)
     for (let y = 0; y < 8; y++) {
       w8(bus, mmio(0x16), (0x1000 + 16 + y) & 0xff);
       w8(bus, mmio(0x17), ((0x1000 + 16 + y) >>> 8) & 0xff);
@@ -32,13 +33,16 @@ describe('Windowed color math (simplified)', () => {
 
     // Brightness
     w8(bus, mmio(0x00), 0x0f);
+    
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
 
     // BG1 main, BG2 subscreen
     w8(bus, mmio(0x2c), 0x01);
     w8(bus, mmio(0x2d), 0x02);
 
     // BG1/BG2 char bases 0x1000
-    w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x0b), 0x11);
     // Set BG2 map base separate to avoid clobbering BG1 tilemap
     w8(bus, mmio(0x08), 0x04); // BG2SC = 0x0400 bytes
     // BG1 tile solid red at (0,0)
@@ -63,6 +67,23 @@ describe('Windowed color math (simplified)', () => {
 
     const rgba = renderMainScreenRGBA(ppu, 8, 1);
     const px = (x: number) => [rgba[x*4], rgba[x*4+1], rgba[x*4+2]];
+    
+    // Debug
+    console.log('Window color math debug:');
+    console.log('  tm:', ppu.tm.toString(2).padStart(5, '0'), 'ts:', ppu.ts.toString(2).padStart(5, '0'));
+    console.log('  cgwsel:', ppu.cgwsel.toString(16), 'cgadsub:', ppu.cgadsub.toString(16));
+    console.log('  w12sel:', ppu.w12sel.toString(16));
+    console.log('  Window A: [', ppu.wh0, '-', ppu.wh1, ']');
+    console.log('  BG1 char base:', ppu.bg1CharBaseWord.toString(16), 'map base:', ppu.bg1MapBaseWord.toString(16));
+    console.log('  BG2 char base:', ppu.bg2CharBaseWord.toString(16), 'map base:', ppu.bg2MapBaseWord.toString(16));
+    console.log('  Tilemap entry at 0:', ppu.inspectVRAMWord(0).toString(16));
+    console.log('  Tilemap entry at 0x200:', ppu.inspectVRAMWord(0x200).toString(16));
+    console.log('  Tile data at 0x1010:', ppu.inspectVRAMWord(0x1010).toString(16));
+    console.log('  CGRAM at 1:', ppu.inspectCGRAMWord(1).toString(16));
+    console.log('  CGRAM at 17:', ppu.inspectCGRAMWord(17).toString(16));
+    for (let x = 0; x < 8; x++) {
+      console.log(`  px[${x}]: R=${px(x)[0]}, G=${px(x)[1]}, B=${px(x)[2]}`);
+    }
 
     // x=0..3 inside window: expect blended R/G > 0
     expect(px(1)[0]).toBeGreaterThan(100);
@@ -78,11 +99,14 @@ describe('Windowed color math (simplified)', () => {
 
     // Brightness
     w8(bus, mmio(0x00), 0x0f);
+    
+    // Set BG mode 1
+    w8(bus, mmio(0x05), 0x01);
 
     // BG1 main, BG2 subscreen
     w8(bus, mmio(0x2c), 0x01);
     w8(bus, mmio(0x2d), 0x02);
-    w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x0b), 0x11);
     // Separate BG2 map base
     w8(bus, mmio(0x08), 0x04);
     writeSolidTile(bus);

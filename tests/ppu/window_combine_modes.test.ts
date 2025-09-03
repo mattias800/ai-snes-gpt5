@@ -29,11 +29,13 @@ describe('Two-window combine modes for BG1 (simplified)', () => {
   function setupBG1BG2(bus: SNESBus) {
     // Brightness
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     // Main BG1, Sub BG2
     w8(bus, mmio(0x2c), 0x01);
     w8(bus, mmio(0x2d), 0x02);
     // Char bases 0x1000
-    w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x0b), 0x11);
     // BG2 map base at 0x0400 bytes to avoid overlap
     w8(bus, mmio(0x08), 0x04);
     // Tiles

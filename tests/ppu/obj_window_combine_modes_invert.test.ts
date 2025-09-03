@@ -27,6 +27,8 @@ describe('OBJ window combine with invert and sub gating', () => {
   function setup(bus: SNESBus) {
     const ppu = bus.getPPU();
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     // OBJ main, BG2 subscreen green
     w8(bus, mmio(0x2c), 0x10);
     w8(bus, mmio(0x2d), 0x02);
@@ -36,7 +38,7 @@ describe('OBJ window combine with invert and sub gating', () => {
     w8(bus, mmio(0x02), 0x00);
     w8(bus, mmio(0x04), 0x00); w8(bus, mmio(0x04), 0x00); w8(bus, mmio(0x04), 0x01); w8(bus, mmio(0x04), 0x00);
     // BG2 map 0x0000, char 0x1000, tile1 pal group1
-    w8(bus, mmio(0x08), 0x00); w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x08), 0x00); w8(bus, mmio(0x0b), 0x11);
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x04);
     // Palettes: OBJ index1 red; BG2 index17 green
     w8(bus, mmio(0x21), 2);  w8(bus, mmio(0x22), 0x00); w8(bus, mmio(0x22), 0x7c);

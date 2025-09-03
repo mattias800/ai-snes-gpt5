@@ -44,6 +44,8 @@ describe('Window gating for BG3 and OBJ (simplified)', () => {
     const bus = mkBus();
     const ppu = bus.getPPU();
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
 
     // Enable BG3 main, BG2 subscreen
     w8(bus, mmio(0x2c), 0x04);
@@ -56,7 +58,7 @@ describe('Window gating for BG3 and OBJ (simplified)', () => {
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x00);
 
     // BG2 for subscreen green
-    w8(bus, mmio(0x0b), 0x22); // BG2 char base 0x1000
+    w8(bus, mmio(0x0b), 0x11); // BG2 char base 0x1000
     w8(bus, mmio(0x08), 0x04); // BG2 map base 0x0400 bytes
     // Write solid 4bpp tile 1
     writeOBJSolid(bus);
@@ -85,6 +87,8 @@ describe('Window gating for BG3 and OBJ (simplified)', () => {
     const bus = mkBus();
     const ppu = bus.getPPU();
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
 
     // Enable OBJ main, BG2 subscreen
     w8(bus, mmio(0x2c), 0x10);
@@ -97,7 +101,7 @@ describe('Window gating for BG3 and OBJ (simplified)', () => {
     w8(bus, mmio(0x04), 0x00); w8(bus, mmio(0x04), 0x00); w8(bus, mmio(0x04), 0x01); w8(bus, mmio(0x04), 0x00);
 
     // BG2 subscreen green tile
-    w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x0b), 0x11);
     w8(bus, mmio(0x08), 0x04);
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x02); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x04);
 

@@ -32,6 +32,8 @@ describe('OBJ 16x16 size and high X support (minimal)', () => {
     const bus = mkBus();
     const ppu = bus.getPPU();
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     // OBSEL: base 0x1000 and 16x16 (bit4)
     w8(bus, mmio(0x01), 0x12); // low nibble 2 => 0x1000, bit4=1 size16
 
@@ -72,6 +74,8 @@ describe('OBJ 16x16 size and high X support (minimal)', () => {
     const bus = mkBus();
     const ppu = bus.getPPU();
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     // 8x8 for simplicity here
     w8(bus, mmio(0x01), 0x02);
     writeSolidTile(bus, 0x1000, 1, 0xff);

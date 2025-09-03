@@ -19,6 +19,8 @@ describe('Color math: add/sub half with backdrop (simplified)', () => {
 
     // Full brightness, enable BG1
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     w8(bus, mmio(0x2c), 0x01);
 
     // BG1 setup: tile1 solid at map (0,0), char base 0x1000
@@ -62,6 +64,8 @@ describe('Color math: add/sub half with backdrop (simplified)', () => {
 
     // Full brightness, enable BG1
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     w8(bus, mmio(0x2c), 0x01);
 
     // BG1: tile1 solid with red max so subtraction from blue backdrop does nothing to red

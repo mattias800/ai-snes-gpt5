@@ -34,11 +34,13 @@ describe('HDMA-like mid-scanline changes (simulated by segment rendering)', () =
 
     // Brightness and layer enables: BG1 main, BG2 subscreen
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     w8(bus, mmio(0x2c), 0x01);
     w8(bus, mmio(0x2d), 0x02);
 
     // BG1/BG2 char bases = 0x1000; BG2 map base separate
-    w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x0b), 0x11);
     w8(bus, mmio(0x08), 0x04);
 
     // Tile data
@@ -82,11 +84,13 @@ describe('HDMA-like mid-scanline changes (simulated by segment rendering)', () =
 
     // Brightness, enable BG1+BG2 main, BG2 subscreen
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     w8(bus, mmio(0x2c), 0x03); // BG1|BG2 main
     w8(bus, mmio(0x2d), 0x02); // BG2 subscreen (not used here)
 
     // Char bases and BG2 map base
-    w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x0b), 0x11);
     w8(bus, mmio(0x08), 0x04);
 
     writeSolidTile(bus);
@@ -125,11 +129,13 @@ describe('HDMA-like mid-scanline changes (simulated by segment rendering)', () =
 
     // Brightness, BG1 main, BG2 subscreen
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     w8(bus, mmio(0x2c), 0x01);
     w8(bus, mmio(0x2d), 0x02);
 
     // Char bases, BG2 map base
-    w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x0b), 0x11);
     w8(bus, mmio(0x08), 0x04);
 
     writeSolidTile(bus);

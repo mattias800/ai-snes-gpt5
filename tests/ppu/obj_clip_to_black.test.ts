@@ -32,6 +32,8 @@ describe('OBJ clip-to-black window mode (CGWSEL bit3) works', () => {
 
     // Brightness
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
 
     // Enable OBJ on main, BG2 on subscreen
     w8(bus, mmio(0x2c), 0x10);
@@ -47,7 +49,7 @@ describe('OBJ clip-to-black window mode (CGWSEL bit3) works', () => {
     w8(bus, mmio(0x04), 0x00);
 
     // BG2: char base 0x1000, map base 0, tile 1 pal group 1
-    w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x0b), 0x11);
     w8(bus, mmio(0x08), 0x00);
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x04);
 

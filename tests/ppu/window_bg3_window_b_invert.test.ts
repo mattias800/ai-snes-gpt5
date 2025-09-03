@@ -31,20 +31,24 @@ describe('BG3 window B and invert B (simplified)', () => {
     const bus = mkBus();
     const ppu = bus.getPPU();
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
 
     // Enable BG3 main, BG2 subscreen
     w8(bus, mmio(0x2c), 0x04);
     w8(bus, mmio(0x2d), 0x02);
 
     // BG3 char base 0x1000, BG3 map base 0
-    w8(bus, mmio(0x0c), 0x20);
+    // BG34NBA: low nibble = BG3, high nibble = BG4
+    // To set BG3 char base to 0x1000 words, we need low nibble = 1
+    w8(bus, mmio(0x0c), 0x01);
     writeBG3Solid(bus);
     w8(bus, mmio(0x09), 0x00);
     // Tile entry 0 -> tile1 pal0
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x00);
 
     // BG2 as subscreen green
-    w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x0b), 0x11);
     w8(bus, mmio(0x08), 0x04);
     for (let y = 0; y < 8; y++) {
       w8(bus, mmio(0x16), (0x1000 + 16 + y) & 0xff);
@@ -83,11 +87,15 @@ describe('BG3 window B and invert B (simplified)', () => {
     const bus = mkBus();
     const ppu = bus.getPPU();
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     w8(bus, mmio(0x2c), 0x04); // BG3 main
     w8(bus, mmio(0x2d), 0x02); // BG2 subscreen
 
     // Setup tiles and palettes as above
-    w8(bus, mmio(0x0c), 0x20);
+    // BG34NBA: low nibble = BG3, high nibble = BG4
+    // To set BG3 char base to 0x1000 words, we need low nibble = 1
+    w8(bus, mmio(0x0c), 0x01);
     // write BG3 solid
     for (let y = 0; y < 8; y++) {
       w8(bus, mmio(0x16), (0x1000 + y*2) & 0xff);
@@ -103,7 +111,7 @@ describe('BG3 window B and invert B (simplified)', () => {
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x00);
 
     // BG2 solid green for sub
-    w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x0b), 0x11);
     w8(bus, mmio(0x08), 0x04);
     for (let y = 0; y < 8; y++) {
       w8(bus, mmio(0x16), (0x1000 + 16 + y) & 0xff);

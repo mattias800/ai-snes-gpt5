@@ -13,11 +13,17 @@ function mkBus() {
 }
 
 function writeBG4SolidTile0(bus: SNESBus, charBaseWords: number) {
-  // 2bpp tile index 0 at char base: plane0=0xFF rows, plane1=0x00
+  // Write 2bpp tile data for BG4 (mode 0 uses 2bpp for all BGs)
   for (let y = 0; y < 8; y++) {
-    w8(bus, mmio(0x16), ((charBaseWords + y) & 0xff));
-    w8(bus, mmio(0x17), (((charBaseWords + y) >>> 8) & 0xff));
+    // Plane 0: all bits set (0xff)
+    w8(bus, mmio(0x16), ((charBaseWords + y*2) & 0xff));
+    w8(bus, mmio(0x17), (((charBaseWords + y*2) >>> 8) & 0xff));
     w8(bus, mmio(0x18), 0xff);
+    w8(bus, mmio(0x19), 0x00);
+    // Plane 1: all bits clear (0x00)
+    w8(bus, mmio(0x16), ((charBaseWords + y*2 + 1) & 0xff));
+    w8(bus, mmio(0x17), (((charBaseWords + y*2 + 1) >>> 8) & 0xff));
+    w8(bus, mmio(0x18), 0x00);
     w8(bus, mmio(0x19), 0x00);
   }
 }
@@ -29,6 +35,8 @@ describe('BG4 2bpp basic render', () => {
 
     // Full brightness
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 0 (all BGs are 2bpp, supports BG1-4)
+    w8(bus, mmio(0x05), 0x00);
     // Enable BG4 only
     w8(bus, mmio(0x2c), 0x08);
 

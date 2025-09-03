@@ -36,6 +36,8 @@ describe('Color math half rounding exactness (add/sub)', () => {
     const ppu = bus.getPPU();
     // Full brightness
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     // BG1 main
     w8(bus, mmio(0x2c), 0x01);
     // char/map
@@ -71,6 +73,8 @@ describe('Color math half rounding exactness (add/sub)', () => {
     const ppu = bus.getPPU();
     // Full brightness
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     // BG1 main
     w8(bus, mmio(0x2c), 0x01);
     w8(bus, mmio(0x07), 0x00); w8(bus, mmio(0x0b), 0x20);

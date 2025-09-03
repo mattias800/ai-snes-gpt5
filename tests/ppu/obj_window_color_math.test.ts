@@ -29,6 +29,8 @@ describe('OBJ windowed color math (WOBJSEL, simplified)', () => {
   function setupOBJMain_BG2Sub(bus: SNESBus) {
     // Brightness
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
     // Enable OBJ main, BG2 subscreen
     w8(bus, mmio(0x2c), 0x10);
     w8(bus, mmio(0x2d), 0x02);
@@ -43,7 +45,7 @@ describe('OBJ windowed color math (WOBJSEL, simplified)', () => {
     w8(bus, mmio(0x04), 0x00); // attr
 
     // BG2: char base 0x1000, map base 0x0000, tile 1 pal group 1
-    w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x0b), 0x11);
     w8(bus, mmio(0x08), 0x00);
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x04);
 

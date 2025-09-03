@@ -32,25 +32,31 @@ describe('BG 16x16 tile size mapping (BGMODE bit4)', () => {
       w8(bus, mmio(0x18), lo & 0xff);
       w8(bus, mmio(0x19), hi & 0xff);
     }
-    // Tile 0 planes
+    // Mode 0 uses 2bpp for BG1. Each tile is 16 bytes (8 words).
+    // 2bpp format: each row is 2 bytes (plane0, plane1)
+    // We'll only set plane0 with distinct patterns, plane1=0 for simplicity
+    
+    // Tile 0 (base index 0) - pattern 0xF0 in plane0 (bits 7-4 set)
     for (let y = 0; y < 8; y++) {
-      writeTileWord(base + y, 0xf0, 0x00);
-      writeTileWord(base + 8 + y, 0x00, 0x00);
+      writeTileWord(base + y, 0xf0, 0x00);  // plane0=0xF0, plane1=0x00
     }
-    // Tile 1 planes (immediately following in bytes -> +16 words)
+    
+    // Tile 1 (immediately following) - pattern 0xCC in plane0
+    // 2bpp tile 1 starts at base + 8 words
     for (let y = 0; y < 8; y++) {
-      writeTileWord(base + 16 + y, 0xcc, 0x00);
-      writeTileWord(base + 16 + 8 + y, 0x00, 0x00);
+      writeTileWord(base + 8 + y, 0xcc, 0x00);
     }
-    // Tile 16 planes (tile row below -> +16*16 = +256 words)
+    
+    // Tile 16 (one row down in 16x16 arrangement) - pattern 0xAA
+    // In 2bpp, tile 16 starts at base + 16*8 = base + 128 words
     for (let y = 0; y < 8; y++) {
-      writeTileWord(base + 256 + y, 0xaa, 0x00);
-      writeTileWord(base + 256 + 8 + y, 0x00, 0x00);
+      writeTileWord(base + 128 + y, 0xaa, 0x00);
     }
-    // Tile 17 planes (base + 256 + 16)
+    
+    // Tile 17 (right of tile 16) - pattern 0x55
+    // Starts at base + 128 + 8 words
     for (let y = 0; y < 8; y++) {
-      writeTileWord(base + 256 + 16 + y, 0x55, 0x00);
-      writeTileWord(base + 256 + 16 + 8 + y, 0x00, 0x00);
+      writeTileWord(base + 128 + 8 + y, 0x55, 0x00);
     }
 
     // Tilemap entry at 0 selects tileIndex 0 (which becomes 4-subtile 16x16)

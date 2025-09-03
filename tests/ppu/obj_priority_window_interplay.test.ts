@@ -31,6 +31,8 @@ describe('OBJ priority vs windowed color math', () => {
 
     // Full brightness
     w8(bus, mmio(0x00), 0x0f);
+    // Set BG mode 1 (BG1/2 are 4bpp, BG3 is 2bpp)
+    w8(bus, mmio(0x05), 0x01);
 
     // OBJ on main, BG2 on subscreen
     w8(bus, mmio(0x2c), 0x10);
@@ -56,7 +58,7 @@ describe('OBJ priority vs windowed color math', () => {
     w8(bus, mmio(0x04), 0x20); // attr (priority=1)
 
     // BG2: green solid at map 0
-    w8(bus, mmio(0x0b), 0x22); w8(bus, mmio(0x08), 0x00);
+    w8(bus, mmio(0x0b), 0x11); w8(bus, mmio(0x08), 0x00);
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x04);
 
     // CGRAM: OBJ index1 red, BG2 index17 green
