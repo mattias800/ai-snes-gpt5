@@ -873,6 +873,17 @@ export class SMP {
         this.setZN8(r);
         return 2;
       }
+      // --- Compare Y with absolute: CMP Y,abs (opcode 0x5E) ---
+      case 0x5e: {
+        const lo = this.read8(this.PC); const hi = this.read8((this.PC + 1) & 0xffff);
+        this.PC = (this.PC + 2) & 0xffff;
+        const addr = ((hi << 8) | lo) & 0xffff;
+        const y = this.Y & 0xff; const m = this.read8(addr) & 0xff;
+        const r = (y - m) & 0xff;
+        if (y >= m) this.PSW |= SMP.C; else this.PSW &= ~SMP.C;
+        this.setZN8(r);
+        return 4;
+      }
       // --- Compare direct page bytes: CMP dp,dp (opcode 0x69) ---
       case 0x69: {
         const dp1 = this.read8(this.PC); const dp2 = this.read8((this.PC + 1) & 0xffff);

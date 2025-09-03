@@ -415,18 +415,23 @@ export class SDSP {
       if (v.envPhase === 0) v.envPhase = 1; // 1=attack,2=decay,3=sustain
 
       if (v.envPhase === 1) {
-        const step = (AR + 1) / 2048; // fast enough
+        // Faster attack rate for better audibility
+        // AR=15 should be nearly instant, AR=0 should be slow
+        const step = AR === 15 ? 1.0 : (AR + 1) / 64; // Much faster attack
         v.env += step;
         if (v.env >= 1.0) { v.env = 1.0; v.envPhase = 2; }
       } else if (v.envPhase === 2) {
-        const step = (DR + 1) / 4096;
+        // Slower decay to prevent immediate fadeout
+        const step = (DR + 1) / 32768; // Much slower decay
         v.env -= step;
         if (v.env <= sustainLevel) { v.env = sustainLevel; v.envPhase = 3; }
       } else {
-        // sustain: approximate linear decay using SR
-        const step = (SR + 1) / 8192;
-        v.env -= step;
-        if (v.env < 0) v.env = 0;
+        // sustain: hold at sustain level (no decay for testing)
+        // const step = SR === 0 ? 0 : (SR) / 65536; // Much slower sustain decay
+        // v.env -= step;
+        // if (v.env < 0) v.env = 0;
+        // Keep envelope at sustain level
+        v.env = sustainLevel;
       }
     } else {
       // GAIN handling (approx). If direct mode (0x00..0x7f), set level directly.
