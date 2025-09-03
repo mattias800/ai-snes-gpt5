@@ -52,7 +52,7 @@ describe('Window gating for BG3 and OBJ (simplified)', () => {
     w8(bus, mmio(0x2d), 0x02);
 
     // Setup BG3 char/map base and tile 1 solid at (0,0), pal group 0
-    w8(bus, mmio(0x0c), 0x20); // BG3 char base 0x1000
+    w8(bus, mmio(0x0c), 0x02); // BG3 char base 0x1000 (nibble 2 in low position)
     writeBG3Solid(bus);
     w8(bus, mmio(0x09), 0x00); // BG3 map base 0
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x00);

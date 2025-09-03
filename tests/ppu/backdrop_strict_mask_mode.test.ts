@@ -33,7 +33,7 @@ describe('Backdrop strict mask mode with mask=0 and bit5=0', () => {
     w8(bus, mmio(0x22), 0x03); // High byte
     // BG1 green tile on subscreen
     w8(bus, mmio(0x07), 0x00);
-    w8(bus, mmio(0x0b), 0x02); // BG1 base at 0x0000, BG2 base at 0x4000
+    w8(bus, mmio(0x0b), 0x00); // BG1 base at 0x0000, BG2 base at 0x0000
     // Mode 0 uses 2bpp tiles, not 4bpp!
     // Write tile 1 graphics at character base 0x0000 + tile 1 offset (8 words for 2bpp)
     // VRAM word address 0x0008 (tile 1 starts at 8 words from base)
