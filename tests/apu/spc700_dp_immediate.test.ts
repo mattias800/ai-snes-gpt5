@@ -11,8 +11,8 @@ describe('SMP MOV dp,#imm respects DP base and preserves PSW', () => {
     apu.smp.PSW = 0x8B; // sentinel flags with P=0
     // MOV $12,#$5A
     apu.aram[pc + 0] = 0x8F; // MOV dp,#imm
-    apu.aram[pc + 1] = 0x12; // dp
-    apu.aram[pc + 2] = 0x5A; // imm
+    apu.aram[pc + 1] = 0x5A; // imm
+    apu.aram[pc + 2] = 0x12; // dp
 
     apu.smp.PC = pc;
     apu.step(24);
@@ -28,8 +28,8 @@ describe('SMP MOV dp,#imm respects DP base and preserves PSW', () => {
 
     apu.smp.PSW = 0xAB | 0x20; // set P=1
     apu.aram[pc + 0] = 0x8F; // MOV dp,#imm
-    apu.aram[pc + 1] = 0x34; // dp
-    apu.aram[pc + 2] = 0x77; // imm
+    apu.aram[pc + 1] = 0x77; // imm
+    apu.aram[pc + 2] = 0x34; // dp
 
     apu.smp.PC = pc;
     apu.step(24);

@@ -84,6 +84,11 @@ export class APUDevice {
     this.dsp.attachAram(this.aram);
     this.t0.reset(); this.t1.reset(); this.t2.reset();
     this.smp.reset();
+    // Read reset vector from IPL ROM and set PC
+    const resetVecLo = this.read8(0xfffe);
+    const resetVecHi = this.read8(0xffff);
+    const resetVec = ((resetVecHi << 8) | resetVecLo) & 0xffff;
+    (this.smp as any).PC = resetVec;
     // Reset boot IPL HLE state but keep enable flag
     this.bootIpl = { busy: false, toggle: false, expectAddrBytes: 0, addr: 0 };
   }

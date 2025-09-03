@@ -13,8 +13,8 @@ describe('SMP memory move semantics', () => {
 
     // mov $21,#$FE
     apu.aram[pc + 0] = 0x8F;
-    apu.aram[pc + 1] = 0x21;
-    apu.aram[pc + 2] = 0xFE;
+    apu.aram[pc + 1] = 0xFE;
+    apu.aram[pc + 2] = 0x21;
 
     apu.smp.PC = pc;
     apu.step(8);

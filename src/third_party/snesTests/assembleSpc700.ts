@@ -47,7 +47,7 @@ export function assembleOne(line: string): Uint8Array {
   if (m) {
     const nn = parseHexByte(m[1]);
     const mm = parseHexByte(m[2]);
-    return new Uint8Array([0x8f, nn, mm]);
+    return new Uint8Array([0x8f, mm, nn]);
   }
   // mov a,$nn+x
   m = t.match(/^mov\s+a\s*,\s*\$(\w{2})\+x$/);
@@ -129,8 +129,8 @@ export function assembleOne(line: string): Uint8Array {
   if (t === 'mov x, a') return new Uint8Array([0x7d]);
   if (t === 'mov a, y') return new Uint8Array([0xdd]);
   if (t === 'mov y, a') return new Uint8Array([0xfd]);
-  if (t === 'mov x, sp') return new Uint8Array([0xbd]);
-  if (t === 'mov sp, x') return new Uint8Array([0x9d]);
+  if (t === 'mov x, sp') return new Uint8Array([0x9d]);
+  if (t === 'mov sp, x') return new Uint8Array([0xbd]);
 
   m = t.match(/^mov\s+x\s*,\s*\$(\w{2})$/);
   if (m) return new Uint8Array([0xf8, parseHexByte(m[1])]);

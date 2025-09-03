@@ -431,15 +431,15 @@ export class SMP {
         this.setZN8(this.Y);
         return 2;
       }
-      // MOV X,SP
+      // MOV SP,X (flags unaffected)
       case 0xbd: {
-        this.X = this.SP & 0xff;
-        this.setZN8(this.X);
+        this.SP = this.X & 0xff;
         return 2;
       }
-      // MOV SP,X (flags unaffected)
+      // MOV X,SP
       case 0x9d: {
-        this.SP = this.X & 0xff;
+        this.X = this.SP & 0xff;
+        this.setZN8(this.X);
         return 2;
       }
 
@@ -1598,7 +1598,7 @@ export class SMP {
 
       // MOV dp,#imm (write immediate to direct page; flags unaffected)
       case 0x8f: {
-        const dp = this.read8(this.PC); const imm = this.read8((this.PC + 1) & 0xffff);
+        const imm = this.read8(this.PC); const dp = this.read8((this.PC + 1) & 0xffff);
         this.PC = (this.PC + 2) & 0xffff;
         this.writeDP(dp, imm & 0xff);
         return 5;
