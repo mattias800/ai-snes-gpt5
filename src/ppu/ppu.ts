@@ -29,7 +29,7 @@ export class PPU {
   public fixedB = 0; // 0..31
 
   // VRAM addressing
-  private vmain = 0x00; // $2115
+  private vmain = 0x00; // $2115 (bit2 selects increment-after-HIGH; default 0 = after LOW)
   private vaddr = 0x0000; // $2116/7 (word address)
   private vramReadLowNext = true; // track read phase for $2139/$213A
   private vramReadLatchWord = 0x0000; // latch word for paired $2139/$213A reads
@@ -38,6 +38,14 @@ export class PPU {
   private vramWriteLatchLow = 0x00;
   private vramWriteLatchHigh = 0x00;
   private vramWriteAddrLatch = 0x0000;
+  private vramWriteHasLow = false;
+  private vramWriteHasHigh = false;
+
+  // Optional VRAM commit debug logging
+  private vramCommitLogEnabled = false;
+  private vramCommitLogRemaining = 0;
+  private vramCommitLogFrom = 0;
+  private vramCommitLogTo = 0x7fff;
 
   // CGRAM addressing
   private cgadd = 0x00; // $2121 (byte index)
@@ -111,6 +119,34 @@ export class PPU {
   public bg1MapHeight64 = false;
 
   // Helpers
+  constructor() {
+    try {
+      // @ts-ignore
+      const env = (globalThis as any).process?.env ?? {};
+      const n = Number(env.SMW_LOG_VRAM_COMMITS ?? '0');
+      if (Number.isFinite(n) && n > 0) {
+        this.vramCommitLogEnabled = true;
+        this.vramCommitLogRemaining = (n | 0);
+        const rangeRaw = (env.SMW_LOG_VRAM_RANGE ?? '').toString().trim();
+        if (rangeRaw) {
+          const m = rangeRaw.replace(/^\$/,'').toLowerCase().match(/^([0-9a-fx]+)\-([0-9a-fx]+)$/);
+          if (m) {
+            const parseHex = (s: string) => s.startsWith('0x') ? Number(s) : parseInt(s, 16);
+            const a = parseHex(m[1]);
+            const b = parseHex(m[2]);
+            if (Number.isFinite(a) && Number.isFinite(b)) {
+              this.vramCommitLogFrom = Math.max(0, Math.min(0x7fff, a|0));
+              this.vramCommitLogTo = Math.max(0, Math.min(0x7fff, b|0));
+              if (this.vramCommitLogFrom > this.vramCommitLogTo) {
+                const t = this.vramCommitLogFrom; this.vramCommitLogFrom = this.vramCommitLogTo; this.vramCommitLogTo = t;
+              }
+            }
+          }
+        }
+      }
+    } catch { /* noop */ }
+  }
+
   private vramStepWords(): number {
     const stepSel = this.vmain & 0x03;
     switch (stepSel) {
@@ -122,11 +158,33 @@ export class PPU {
     }
   }
   private incOnHigh(): boolean {
-    // Hardware semantics: VMAIN bit7 = 1 -> increment after HIGH byte ($2119); bit7 = 0 -> increment after LOW byte ($2118)
+    // Hardware semantics (VMAIN $2115):
+    // - bit7 = 1 -> increment after HIGH byte ($2119)
+    // - bit7 = 0 -> increment after LOW byte ($2118)
     return (this.vmain & 0x80) !== 0;
   }
   private incVAddr(): void {
     this.vaddr = (this.vaddr + this.vramStepWords()) & 0xffff;
+  }
+
+  // Translate logical VADDR (word address) to physical VRAM word address based on VMAIN full-graphic mode.
+  private physVRAMAddr(addr: number): number {
+    const a = addr & 0x7fff; // 15-bit word address space
+    const fgMode = (this.vmain >> 2) & 0x03; // 0=linear, 1=2bpp, 2=4bpp, 3=8bpp
+    if (fgMode === 0) return a;
+    const idx = fgMode - 1; // 0->2bpp, 1->4bpp, 2->8bpp
+    const row = a & 0x0007; // 0..7 row within 8x8 tile
+    const wordsPerRow = 1 << idx; // 2bpp:1, 4bpp:2, 8bpp:4 words per tile row
+    const wordInRowMask = wordsPerRow - 1;
+    const wordInRow = (wordInRowMask > 0) ? ((a >> 3) & wordInRowMask) : 0;
+    const tileX = (a >> (3 + idx)) & 0x001f; // 0..31
+    const tileY = (a >> (3 + idx + 5)) & 0x001f; // 0..31
+    const wordsPerPageRow = 32 * wordsPerRow; // words across one row of 32 tiles
+    const withinPage = (((tileY * 8) + row) * wordsPerPageRow) + (tileX * wordsPerRow) + wordInRow;
+    const pageShift = 13 + idx; // bits consumed within a page
+    const pageBase = (a >> pageShift) << pageShift; // keep page-select upper bits
+    const phys = pageBase + withinPage;
+    return phys & 0x7fff;
   }
 
   // Expose for tests
@@ -162,18 +220,20 @@ export class PPU {
     switch (addr) {
       // VRAM read: $2139 (low), $213A (high)
       case 0x39: {
-        // Latch the current word and return low byte; increment may occur after low depending on VMAIN bit7
-        this.vramReadLatchWord = this.vram[this.vaddr & 0x7fff] & 0xffff;
+        // Latch the current word and return low byte.
+        // If bit7=0 (increment-after-LOW), the increment occurs now after reading low.
+        this.vramReadLatchWord = this.vram[this.physVRAMAddr(this.vaddr)] & 0xffff;
         const v = this.vramReadLatchWord & 0xff;
-        if (!this.incOnHigh()) this.incVAddr(); // increment after low when bit7=1
+        if (!this.incOnHigh()) this.incVAddr(); // increment-after-LOW
         this.vramReadLowNext = false;
         this.regs[addr] = v;
         return v;
       }
       case 0x3a: {
-        // Return high byte from the latched word; increment may occur after high when bit7=0
+        // Return high byte from the latched word.
+        // If bit7=1 (increment-after-HIGH), the increment occurs now after reading high.
         const v = (this.vramReadLatchWord >>> 8) & 0xff;
-        if (this.incOnHigh()) this.incVAddr(); // increment after high when bit7=0
+        if (this.incOnHigh()) this.incVAddr(); // increment-after-HIGH
         this.vramReadLowNext = true;
         this.regs[addr] = v;
         return v;
@@ -251,17 +311,25 @@ export class PPU {
         break;
       }
       case 0x0b: { // BG12NBA ($210B)
-        // Hardware mapping: BG1 = LOW nibble, BG2 = HIGH nibble
-        // Scale: nibble selects base in units of 0x2000 bytes => 0x1000 words
-        this.bg1CharBaseWord = (v & 0x0f) << 12;
-        this.bg2CharBaseWord = ((v >> 4) & 0x0f) << 12;
+        // Hardware mapping:
+        // - BG1 char base = LOW nibble * 0x1000 words (0x2000 bytes)
+        // - BG2 char base = HIGH nibble * 0x1000 words (0x2000 bytes)
+        // Note: Some test ROMs (e.g., cputest/spctest) place tiles at VADDR word $4000 and expect $210B=$04 to select that base.
+        // To match that expectation, compute base in words using <<12.
+        const low = v & 0x0f;
+        const high = (v >> 4) & 0x0f;
+        this.bg1CharBaseWord = (low & 0x0f) << 12;
+        this.bg2CharBaseWord = (high & 0x0f) << 12;
         break;
       }
       case 0x0c: { // BG34NBA ($210C)
-        // Hardware mapping: BG3 = LOW nibble, BG4 = HIGH nibble
-        // Scale: nibble selects base in units of 0x2000 bytes => 0x1000 words
-        this.bg3CharBaseWord = (v & 0x0f) << 12;
-        this.bg4CharBaseWord = ((v >> 4) & 0x0f) << 12;
+        // Hardware mapping (same units as BG12NBA):
+        // - BG3 char base = LOW nibble * 0x1000 words (0x2000 bytes)
+        // - BG4 char base = HIGH nibble * 0x1000 words (0x2000 bytes)
+        const low = v & 0x0f;
+        const high = (v >> 4) & 0x0f;
+        this.bg3CharBaseWord = (low & 0x0f) << 12;
+        this.bg4CharBaseWord = (high & 0x0f) << 12;
         break;
       }
       case 0x05: { // BGMODE ($2105)
@@ -365,32 +433,56 @@ export class PPU {
         break;
       }
       case 0x18: { // VMDATAL ($2118)
-        if (this.incOnHigh()) {
-          // Increment-after-high: low arrives first. Latch low and address; commit on high.
-          this.vramWriteLatchLow = v & 0xff;
+        // Latch low byte; if this is the first of the pair, capture the address
+        if (!this.vramWriteHasLow && !this.vramWriteHasHigh) {
           this.vramWriteAddrLatch = this.vaddr & 0x7fff;
-        } else {
-          // Increment-after-low: low write COMMITs using previously latched high at the latched address.
-          const addr = this.vramWriteAddrLatch & 0x7fff;
-          const low = v & 0xff;
-          const high = this.vramWriteLatchHigh & 0xff;
-          this.vram[addr] = ((high << 8) | low) & 0xffff;
-          this.incVAddr(); // increment occurs after low
+        }
+        this.vramWriteLatchLow = v & 0xff;
+        this.vramWriteHasLow = true;
+        // Apply address increment timing for LOW if configured
+        if (!this.incOnHigh()) this.incVAddr();
+        // If we already have a high byte, commit the pair now
+        if (this.vramWriteHasHigh) {
+          const addr = this.physVRAMAddr(this.vramWriteAddrLatch);
+          const word = ((this.vramWriteLatchHigh & 0xff) << 8) | (this.vramWriteLatchLow & 0xff);
+          this.vram[addr] = word & 0xffff;
+          if (this.vramCommitLogEnabled && this.vramCommitLogRemaining > 0) {
+            if (addr >= this.vramCommitLogFrom && addr <= this.vramCommitLogTo) {
+              // eslint-disable-next-line no-console
+              console.log(`[VRAMCOMMIT] addr=0x${addr.toString(16)} word=0x${word.toString(16).padStart(4,'0')}`);
+              this.vramCommitLogRemaining--;
+            }
+          }
+          // Clear pair state
+          this.vramWriteHasLow = false;
+          this.vramWriteHasHigh = false;
         }
         break;
       }
       case 0x19: { // VMDATAH ($2119)
-        if (this.incOnHigh()) {
-          // Increment-after-high: high write COMMITs using previously latched low at the latched address.
-          const addr = this.vramWriteAddrLatch & 0x7fff;
-          const low = this.vramWriteLatchLow & 0xff;
-          const high = v & 0xff;
-          this.vram[addr] = ((high << 8) | low) & 0xffff;
-          this.incVAddr(); // increment occurs after high
-        } else {
-          // Increment-after-low: high arrives first. Latch high and address; commit on low.
-          this.vramWriteLatchHigh = v & 0xff;
+        // Latch high byte; if this is the first of the pair, capture the address
+        if (!this.vramWriteHasLow && !this.vramWriteHasHigh) {
           this.vramWriteAddrLatch = this.vaddr & 0x7fff;
+        }
+        this.vramWriteLatchHigh = v & 0xff;
+        this.vramWriteHasHigh = true;
+        // Apply address increment timing for HIGH if configured
+        if (this.incOnHigh()) this.incVAddr();
+        // If we already have a low byte, commit the pair now
+        if (this.vramWriteHasLow) {
+          const addr = this.physVRAMAddr(this.vramWriteAddrLatch);
+          const word = ((this.vramWriteLatchHigh & 0xff) << 8) | (this.vramWriteLatchLow & 0xff);
+          this.vram[addr] = word & 0xffff;
+          if (this.vramCommitLogEnabled && this.vramCommitLogRemaining > 0) {
+            if (addr >= this.vramCommitLogFrom && addr <= this.vramCommitLogTo) {
+              // eslint-disable-next-line no-console
+              console.log(`[VRAMCOMMIT] addr=0x${addr.toString(16)} word=0x${word.toString(16).padStart(4,'0')}`);
+              this.vramCommitLogRemaining--;
+            }
+          }
+          // Clear pair state
+          this.vramWriteHasLow = false;
+          this.vramWriteHasHigh = false;
         }
         break;
       }
