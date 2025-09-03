@@ -36,7 +36,7 @@ describe('Mixed main/sub gating with wrap-around windows and subGate', () => {
     w8(bus, mmio(0x05), 0x01);
     w8(bus, mmio(0x2c), 0x01);
     w8(bus, mmio(0x2d), 0x02);
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     w8(bus, mmio(0x08), 0x04);
 
     writeSolid(bus);

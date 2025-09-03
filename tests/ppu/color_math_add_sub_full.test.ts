@@ -32,7 +32,7 @@ describe('Color math without half (full add/sub)', () => {
     w8(bus, mmio(0x05), 0x01);
     w8(bus, mmio(0x07), 0x00); // BG1 map base
     w8(bus, mmio(0x08), 0x04); // BG2 map base offset
-    w8(bus, mmio(0x0b), 0x11); // char bases 0x1000
+    w8(bus, mmio(0x0b), 0x22); // char bases 0x1000
     writeSolid4bppTile(bus);
     // BG1 tile at 0 (pal0)
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x00);

@@ -45,7 +45,7 @@ describe('OBJ windowed color math (WOBJSEL, simplified)', () => {
     w8(bus, mmio(0x04), 0x00); // attr
 
     // BG2: char base 0x1000, map base 0x0000, tile 1 pal group 1
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     w8(bus, mmio(0x08), 0x00);
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x04);
 

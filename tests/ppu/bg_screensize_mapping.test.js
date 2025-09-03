@@ -15,7 +15,7 @@ describe('BG screen size mapping (64x32 and 32x64)', () => {
         const ppu = bus.getPPU();
         // Set BG1 map base 0x0000, char base 0x1000, 8x8 tiles
         w8(bus, mmio(0x07), 0x03); // size=3 -> 64x64 (both width and height flags true)
-        w8(bus, mmio(0x0b), 0x20); // char base 0x1000 words
+        w8(bus, mmio(0x0b), 0x02); // char base 0x1000 words
         // Prepare tile 0 (all pixels value 1) and tile 1 (all pixels 0)
         const base = 0x1000;
         function writeTileFill(tileIndex, byte) {

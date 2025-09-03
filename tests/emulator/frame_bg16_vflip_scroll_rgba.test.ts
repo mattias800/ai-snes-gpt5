@@ -33,7 +33,7 @@ describe('Frame RGBA: BG1 16x16 V-flip and scroll offsets map subtiles correctly
 
     // BG1 bases and VMAIN
     w8(bus, mmio(0x07), 0x00);
-    w8(bus, mmio(0x0b), 0x10);
+    w8(bus, mmio(0x0b), 0x02);
     w8(bus, mmio(0x15), 0x00);
 
     // Compose a 16x16 tile made of 4 subtiles with distinct plane0 patterns:

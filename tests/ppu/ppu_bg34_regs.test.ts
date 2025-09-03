@@ -24,11 +24,11 @@ describe('PPU BG3/BG4 base and scroll registers', () => {
     w8(bus, mmio(0x0a), 0x10);
     expect(ppu.bg4MapBaseWord).toBe(0x0800);
 
-    // BG34NBA ($210C) hardware: BG3=LOW nibble, BG4=HIGH nibble; unit=0x2000 bytes (0x1000 words)
-    // Write 0xB7: BG3 nibble=0x7 -> 0x7000 words; BG4 nibble=0xB -> 0xB000 words
+    // BG34NBA ($210C) hardware: BG3=LOW nibble, BG4=HIGH nibble; unit=0x1000 bytes (0x800 words)
+    // Write 0xB7: BG3 nibble=0x7 -> 0x7 * 0x800 = 0x3800 words; BG4 nibble=0xB -> 0xB * 0x800 = 0x5800 words
     w8(bus, mmio(0x0c), 0xb7);
-    expect(ppu.bg3CharBaseWord).toBe(0x7000);
-    expect(ppu.bg4CharBaseWord).toBe(0xb000);
+    expect(ppu.bg3CharBaseWord).toBe(0x3800);
+    expect(ppu.bg4CharBaseWord).toBe(0x5800);
 
     // BG3HOFS/VOFS $2111/$2112
     w8(bus, mmio(0x11), 0x12);

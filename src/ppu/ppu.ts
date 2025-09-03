@@ -312,24 +312,23 @@ export class PPU {
       }
       case 0x0b: { // BG12NBA ($210B)
         // Hardware mapping:
-        // - BG1 char base = LOW nibble * 0x1000 words (0x2000 bytes)
-        // - BG2 char base = HIGH nibble * 0x1000 words (0x2000 bytes)
-        // Note: Some test ROMs (e.g., cputest/spctest) place tiles at VADDR word $4000 and expect $210B=$04 to select that base.
-        // To match that expectation, compute base in words using <<12.
+        // - BG1 char base = LOW nibble * 0x1000 bytes (0x800 words)
+        // - BG2 char base = HIGH nibble * 0x1000 bytes (0x800 words)
+        // Standard SNES hardware uses units of 0x800 words (<<11)
         const low = v & 0x0f;
         const high = (v >> 4) & 0x0f;
-        this.bg1CharBaseWord = (low & 0x0f) << 12;
-        this.bg2CharBaseWord = (high & 0x0f) << 12;
+        this.bg1CharBaseWord = (low & 0x0f) << 11;
+        this.bg2CharBaseWord = (high & 0x0f) << 11;
         break;
       }
       case 0x0c: { // BG34NBA ($210C)
         // Hardware mapping (same units as BG12NBA):
-        // - BG3 char base = LOW nibble * 0x1000 words (0x2000 bytes)
-        // - BG4 char base = HIGH nibble * 0x1000 words (0x2000 bytes)
+        // - BG3 char base = LOW nibble * 0x1000 bytes (0x800 words)  
+        // - BG4 char base = HIGH nibble * 0x1000 bytes (0x800 words)
         const low = v & 0x0f;
         const high = (v >> 4) & 0x0f;
-        this.bg3CharBaseWord = (low & 0x0f) << 12;
-        this.bg4CharBaseWord = (high & 0x0f) << 12;
+        this.bg3CharBaseWord = (low & 0x0f) << 11;
+        this.bg4CharBaseWord = (high & 0x0f) << 11;
         break;
       }
       case 0x05: { // BGMODE ($2105)

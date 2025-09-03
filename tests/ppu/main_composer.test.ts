@@ -25,9 +25,10 @@ describe('Main screen composer: BG1 over BG2 (simplified)', () => {
     // Enable BG1 and BG2 on TM
     w8(bus, mmio(0x2c), 0x03);
 
-    // BG1: map base 0x0000, char base 0x1000; tile 0 has pix=0 -> transparent
+    // BG1: map base 0x0000, char base 0x1000
     w8(bus, mmio(0x07), 0x00);
-    w8(bus, mmio(0x0b), 0x01);
+    // BG12NBA: low nibble=BG1, high nibble=BG2. Set BG1=0x1000, BG2=0x2000
+    w8(bus, mmio(0x0b), 0x42);
     // Write tile 0: all planes zero => pix=0
     for (let y = 0; y < 16; y++) {
       w8(bus, mmio(0x16), (0x1000 + y) & 0xff);
@@ -35,23 +36,28 @@ describe('Main screen composer: BG1 over BG2 (simplified)', () => {
       w8(bus, mmio(0x18), 0x00);
       w8(bus, mmio(0x19), 0x00);
     }
-    // Place tile 1 at VRAM char base + 16 words with plane0=0xFF -> pix=1
+    // Place tile 1 at VRAM char base + 16 words (4bpp tile)
+    // First 8 words: plane0/1 pairs for rows 0-7
     for (let y = 0; y < 8; y++) {
-      w8(bus, mmio(0x16), (0x1000 + 16 + y) & 0xff);
-      w8(bus, mmio(0x17), ((0x1000 + 16 + y) >>> 8) & 0xff);
-      w8(bus, mmio(0x18), 0xff);
-      w8(bus, mmio(0x19), 0x00);
-      w8(bus, mmio(0x16), (0x1000 + 16 + 8 + y) & 0xff);
-      w8(bus, mmio(0x17), ((0x1000 + 16 + 8 + y) >>> 8) & 0xff);
-      w8(bus, mmio(0x18), 0x00);
-      w8(bus, mmio(0x19), 0x00);
+      w8(bus, mmio(0x16), (0x1000 + 16 + y*2) & 0xff);
+      w8(bus, mmio(0x17), ((0x1000 + 16 + y*2) >>> 8) & 0xff);
+      w8(bus, mmio(0x18), 0xff); // plane0 = 0xFF (all bits set)
+      w8(bus, mmio(0x19), 0x00); // plane1 = 0x00
+    }
+    // Next 8 words: plane2/3 pairs for rows 0-7  
+    for (let y = 0; y < 8; y++) {
+      w8(bus, mmio(0x16), (0x1000 + 16 + 8 + y*2) & 0xff);
+      w8(bus, mmio(0x17), ((0x1000 + 16 + 8 + y*2) >>> 8) & 0xff);
+      w8(bus, mmio(0x18), 0x00); // plane2 = 0x00
+      w8(bus, mmio(0x19), 0x00); // plane3 = 0x00
     }
 
-    // BG2: map base 0x0400 words, char base 0x2000 words; tile 0 has pix=1 (solid)
-    w8(bus, mmio(0x08), 0x04); // 0x0400 bytes => 0x0200 words; but our renderer assumes base is words directly -> use map entries at 0
-    w8(bus, mmio(0x0b), 0x20); // keep BG1 char base; BG2 char base is low nibble of $210B (we used only BG2 indices renderer reading bg2CharBaseWord)
-    // Actually set BG2 char base via nibble of $210B low: write 0x02 already set -> 0x1000 words; bump to 0x2000 by writing $210B low nibble 4 (but that would also move BG1)
-    // Simpler: keep BG2 char base same as BG1 (0x1000) and map tile index 1 for BG2 to use our solid tile1.
+    // BG2: map base 0x0400 words (register takes offset in 1KB chunks)
+    // BG2SC register: bits 2-7 = base offset in 1KB units = 0x400 bytes = 0x200 words
+    // To set map base at word 0x200, we need value 0x04 (0x04 << 10 bytes = 0x1000 bytes = 0x800 words)
+    // Actually the encoding is: (value & 0xFC) << 8 = base in bytes. So 0x04 -> 0x400 bytes = 0x200 words
+    w8(bus, mmio(0x08), 0x04);
+    // BG2 char base is already set to 0x2000 via BG12NBA above
 
     // BG1 tilemap: left half tile1 (solid), right half tile0 (transparent)
     for (let x = 0; x < 8; x++) {
@@ -63,10 +69,24 @@ describe('Main screen composer: BG1 over BG2 (simplified)', () => {
       w8(bus, mmio(0x19), 0x00);
     }
 
+    // Also write tile 1 at BG2 char base (0x2000)
+    for (let y = 0; y < 8; y++) {
+      w8(bus, mmio(0x16), (0x2000 + 16 + y*2) & 0xff);
+      w8(bus, mmio(0x17), ((0x2000 + 16 + y*2) >>> 8) & 0xff);
+      w8(bus, mmio(0x18), 0xff); // plane0 = 0xFF
+      w8(bus, mmio(0x19), 0x00); // plane1 = 0x00
+    }
+    for (let y = 0; y < 8; y++) {
+      w8(bus, mmio(0x16), (0x2000 + 16 + 8 + y*2) & 0xff);
+      w8(bus, mmio(0x17), ((0x2000 + 16 + 8 + y*2) >>> 8) & 0xff);
+      w8(bus, mmio(0x18), 0x00); // plane2 = 0x00
+      w8(bus, mmio(0x19), 0x00); // plane3 = 0x00
+    }
+    
     // BG2 tilemap: entire row uses tile1 (solid)
-    // Use BG2 map base at 0 words for indices renderer simplicity
+    // BG2 map base is at word 0x200
     for (let x = 0; x < 8; x++) {
-      const addr = x;
+      const addr = 0x200 + x;
       w8(bus, mmio(0x16), addr & 0xff);
       w8(bus, mmio(0x17), (addr >>> 8) & 0xff);
       w8(bus, mmio(0x18), 1);

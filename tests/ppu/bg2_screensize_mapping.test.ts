@@ -19,7 +19,7 @@ describe('BG2 screen size mapping (64x32 and 32x64)', () => {
 
     // Set BG2 screen size to 64x64 (size=3) to test both width/height flags, char base 0x1000
     w8(bus, mmio(0x08), 0x03); // BG2SC size=3
-    w8(bus, mmio(0x0b), 0x11); // BG1 char base 0x1000, BG2 char base 0x1000
+    w8(bus, mmio(0x0b), 0x22); // BG1 char base 0x1000, BG2 char base 0x1000
 
     // Prepare tile 0 (all pixels value 1) and tile 1 (all pixels 0)
     const base = 0x1000;

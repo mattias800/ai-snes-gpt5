@@ -27,7 +27,7 @@ describe('BG3 2bpp basic render in composer (Mode 1-style)', () => {
     // BG3 map base at 0x0000 (default)
     w8(bus, mmio(0x09), 0x00); // BG3SC
     // BG3 char base nibble=1 -> 0x1000 words
-    w8(bus, mmio(0x0c), 0x01); // BG34NBA: BG3 nibble=1 (low), BG4 nibble=0 (high)
+    w8(bus, mmio(0x0c), 0x02); // BG34NBA: BG3 nibble=1 (low), BG4 nibble=0 (high)
 
     // Create a 2bpp tile at BG3 char base: tile 0 at 0x1000 words
     // For 2bpp tiles, each tile is 8 words, so tile 0 starts at char base

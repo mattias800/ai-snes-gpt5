@@ -19,7 +19,7 @@ describe('BG1 register-driven render with scroll', () => {
 
     // Set BG1 map base to 0x0000 words, char base to 0x1000 words
     w8(bus, mmio(0x07), 0x00); // BG1SC
-    w8(bus, mmio(0x0b), 0x20); // BG12NBA -> char base nibble 2 = 0x1000 words
+    w8(bus, mmio(0x0b), 0x02); // BG12NBA -> char base nibble 2 = 0x1000 words
 
     // Create a tile at 0x1000: set plane0 to 0xFF for all rows -> all pixels 1
     w8(bus, mmio(0x15), 0x00); // VMAIN: inc after high

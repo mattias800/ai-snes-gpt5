@@ -41,14 +41,14 @@ describe('BG3 window B and invert B (simplified)', () => {
     // BG3 char base 0x1000, BG3 map base 0
     // BG34NBA: low nibble = BG3, high nibble = BG4
     // To set BG3 char base to 0x1000 words, we need low nibble = 1
-    w8(bus, mmio(0x0c), 0x01);
+    w8(bus, mmio(0x0c), 0x02);
     writeBG3Solid(bus);
     w8(bus, mmio(0x09), 0x00);
     // Tile entry 0 -> tile1 pal0
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x00);
 
     // BG2 as subscreen green
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     w8(bus, mmio(0x08), 0x04);
     for (let y = 0; y < 8; y++) {
       w8(bus, mmio(0x16), (0x1000 + 16 + y) & 0xff);
@@ -95,7 +95,7 @@ describe('BG3 window B and invert B (simplified)', () => {
     // Setup tiles and palettes as above
     // BG34NBA: low nibble = BG3, high nibble = BG4
     // To set BG3 char base to 0x1000 words, we need low nibble = 1
-    w8(bus, mmio(0x0c), 0x01);
+    w8(bus, mmio(0x0c), 0x02);
     // write BG3 solid
     for (let y = 0; y < 8; y++) {
       w8(bus, mmio(0x16), (0x1000 + y*2) & 0xff);
@@ -111,7 +111,7 @@ describe('BG3 window B and invert B (simplified)', () => {
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x00);
 
     // BG2 solid green for sub
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     w8(bus, mmio(0x08), 0x04);
     for (let y = 0; y < 8; y++) {
       w8(bus, mmio(0x16), (0x1000 + 16 + y) & 0xff);

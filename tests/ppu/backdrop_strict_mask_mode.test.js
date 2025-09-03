@@ -24,7 +24,7 @@ describe('Backdrop strict mask mode with mask=0 and bit5=0', () => {
         w8(bus, mmio(0x22), 0x7c);
         // BG1 green tile on subscreen
         w8(bus, mmio(0x07), 0x00);
-        w8(bus, mmio(0x0b), 0x20);
+        w8(bus, mmio(0x0b), 0x02);
         for (let y = 0; y < 8; y++) {
             w8(bus, mmio(0x16), (0x1000 + 16 + y) & 0xff);
             w8(bus, mmio(0x17), ((0x1000 + 16 + y) >>> 8) & 0xff);

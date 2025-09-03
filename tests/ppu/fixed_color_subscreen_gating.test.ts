@@ -23,7 +23,7 @@ describe('Subscreen fixed color gating with window masks over backdrop sub', () 
     // No subscreen layers -> backdrop subscreen
     w8(bus, mmio(0x2d), 0x00);
     // BG1 char/map
-    w8(bus, mmio(0x07), 0x00); w8(bus, mmio(0x0b), 0x20);
+    w8(bus, mmio(0x07), 0x00); w8(bus, mmio(0x0b), 0x02);
     // solid tile1
     for (let y = 0; y < 8; y++) {
       w8(bus, mmio(0x16), (0x1000 + 16 + y) & 0xff);

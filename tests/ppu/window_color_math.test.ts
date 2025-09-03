@@ -42,7 +42,7 @@ describe('Windowed color math (simplified)', () => {
     w8(bus, mmio(0x2d), 0x02);
 
     // BG1/BG2 char bases 0x1000
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     // Set BG2 map base separate to avoid clobbering BG1 tilemap
     w8(bus, mmio(0x08), 0x04); // BG2SC = 0x0400 bytes
     // BG1 tile solid red at (0,0)
@@ -106,7 +106,7 @@ describe('Windowed color math (simplified)', () => {
     // BG1 main, BG2 subscreen
     w8(bus, mmio(0x2c), 0x01);
     w8(bus, mmio(0x2d), 0x02);
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     // Separate BG2 map base
     w8(bus, mmio(0x08), 0x04);
     writeSolidTile(bus);

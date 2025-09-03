@@ -40,7 +40,7 @@ describe('Backdrop window gating and clip-to-black', () => {
     w8(bus, mmio(0x22), 0x7c);
     // BG1 green tile on subscreen
     w8(bus, mmio(0x07), 0x00);
-    w8(bus, mmio(0x0b), 0x20);
+    w8(bus, mmio(0x0b), 0x02);
     writeSolid(bus);
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x00);
     // CGRAM index1 = green 0x03E0

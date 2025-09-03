@@ -50,10 +50,10 @@ describe('BG4 window wrap-around with combine modes (AND/XOR/XNOR+invert)', () =
 
     // BG4 map base 0, BG4 char base 0x0800 words
     w8(bus, mmio(0x0a), 0x00);
-    w8(bus, mmio(0x0c), 0x10);
+    w8(bus, mmio(0x0c), 0x20);
     // BG2 map base word 0x0200, BG2 char base 0x1000 words
     w8(bus, mmio(0x08), 0x04);
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
 
     // Data: BG4 tile0 solid; BG2 tile1 solid
     writeBG4SolidTile0(bus, 0x1000);

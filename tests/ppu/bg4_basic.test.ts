@@ -42,7 +42,7 @@ describe('BG4 2bpp basic render', () => {
 
     // BG4 map base 0, BG4 char base nibble=1 -> 0x1000 words (BG4=HIGH nibble)
     w8(bus, mmio(0x0a), 0x00);
-    w8(bus, mmio(0x0c), 0x10);
+    w8(bus, mmio(0x0c), 0x20);
 
     // Create 2bpp solid tile index 0 at 0x1000 words
     writeBG4SolidTile0(bus, 0x1000);

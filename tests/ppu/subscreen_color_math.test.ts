@@ -29,7 +29,7 @@ describe('Subscreen + per-layer color math masks (simplified)', () => {
     // BG1 char base 0x1000, tile1 solid (pix=1), map at 0
     w8(bus, mmio(0x07), 0x00);
     // Set BG1 and BG2 char bases to 0x1000 so both layers use the same tile graphics
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     for (let y = 0; y < 8; y++) {
       w8(bus, mmio(0x16), (0x1000 + 16 + y) & 0xff);
       w8(bus, mmio(0x17), ((0x1000 + 16 + y) >>> 8) & 0xff);

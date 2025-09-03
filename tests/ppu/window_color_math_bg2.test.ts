@@ -40,7 +40,7 @@ describe('Windowed color math for BG2 (simplified)', () => {
     w8(bus, mmio(0x2d), 0x01);
 
     // BG1/BG2 char bases 0x1000 and BG2 map base separate
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     w8(bus, mmio(0x08), 0x04); // BG2SC = 0x0400 bytes
 
     // Write solid 4bpp tile
@@ -85,7 +85,7 @@ describe('Windowed color math for BG2 (simplified)', () => {
     // BG2 main, BG1 subscreen
     w8(bus, mmio(0x2c), 0x02);
     w8(bus, mmio(0x2d), 0x01);
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     w8(bus, mmio(0x08), 0x04);
 
     writeSolid4bppTile(bus);

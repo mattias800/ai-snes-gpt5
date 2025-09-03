@@ -23,7 +23,7 @@ describe('Frame RGBA: OBJ over BG1 (priority, transparency)', () => {
 
     // BG1: map base 0x0000, char base 0x0800 words; VMAIN +1 word
     w8(bus, mmio(0x07), 0x00);
-    w8(bus, mmio(0x0b), 0x10);
+    w8(bus, mmio(0x0b), 0x02);
     w8(bus, mmio(0x15), 0x00);
 
     // Write 4bpp tile 0 at 0x0800: solid palette index 1 (plane0=0xFF)

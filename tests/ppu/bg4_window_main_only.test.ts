@@ -44,7 +44,7 @@ describe('BG4 window gating main-only (no subscreen gating)', () => {
 
     // BG4 map base 0, char base 0x0800 words
     w8(bus, mmio(0x0a), 0x00);
-    w8(bus, mmio(0x0c), 0x10);
+    w8(bus, mmio(0x0c), 0x20);
 
     // Write BG4 solid tile0
     writeBG4SolidTile0(bus, 0x1000);

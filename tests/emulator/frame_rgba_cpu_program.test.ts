@@ -2,8 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { Emulator } from '../../src/emulator/core';
 import { Scheduler } from '../../src/emulator/scheduler';
 import { Cartridge } from '../../src/cart/cartridge';
-import { renderMainScreenRGBA, renderBG1RegionIndices } from '../../src/ppu/bg';
-import { render4bppTileIndices } from '../../src/ppu/renderer';
+import { renderMainScreenRGBA } from '../../src/ppu/bg';
 
 function pushByte(prog: number[], b: number) { prog.push(b & 0xff); }
 function ldaImm(prog: number[], v: number) { pushByte(prog, 0xa9); pushByte(prog, v); }
@@ -17,10 +16,12 @@ function buildProgram(): Uint8Array {
   ldaImm(p, 0x0f); staAbs(p, 0x2100);
   // Enable BG1 on main screen (TM $212C = 0x01)
   ldaImm(p, 0x01); staAbs(p, 0x212c);
+  // BGMODE ($2105) = 0x01 (mode 1: BG1/2 are 4bpp, BG3 is 2bpp)
+  ldaImm(p, 0x01); staAbs(p, 0x2105);
   // BG1SC ($2107) = 0x00 (map base 0x0000, 32x32)
   ldaImm(p, 0x00); staAbs(p, 0x2107);
-  // BG12NBA ($210B) = 0x01 (BG1 char base nibble=1 -> char base 0x0800 words)
-  ldaImm(p, 0x01); staAbs(p, 0x210b);
+  // BG12NBA ($210B) = 0x02 (BG1 char base nibble=2 -> char base 0x1000 words)
+  ldaImm(p, 0x02); staAbs(p, 0x210b);
   // VMAIN ($2115) = 0x80 (inc after HIGH, +1 word)
   ldaImm(p, 0x80); staAbs(p, 0x2115);
 
@@ -87,16 +88,6 @@ describe('Frame-level main RGBA through CPU program and PPU ports', () => {
     const ppu = emu.bus.getPPU();
     const W = 16, H = 16;
     const rgba = renderMainScreenRGBA(ppu, W, H);
-
-    // Debug values to aid failures
-    // eslint-disable-next-line no-console
-    console.log(`[frame_rgba_cpu] forceBlank=${ppu.forceBlank} brightness=${ppu.brightness} tm=0x${ppu.tm.toString(16)} cgram1=0x${ppu.inspectCGRAMWord(1).toString(16)} vram0=0x${ppu.inspectVRAMWord(0).toString(16)} mapBase=${ppu.bg1MapBaseWord} charBase=${ppu.bg1CharBaseWord}`);
-    const tile0 = render4bppTileIndices(ppu, ppu.bg1CharBaseWord, 0);
-    // eslint-disable-next-line no-console
-    console.log(`[frame_rgba_cpu] tile0[0..7]=${tile0.slice(0,8).join(',')}`);
-    const indices = renderBG1RegionIndices(ppu, W, H);
-    // eslint-disable-next-line no-console
-    console.log(`[frame_rgba_cpu] indices[0..3]=${indices.slice(0,4).join(',')}`);
 
     // Build expected RGBA: top-left 8x8 red, rest black
     const expected = new Uint8ClampedArray(W * H * 4);

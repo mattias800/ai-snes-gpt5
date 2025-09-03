@@ -20,9 +20,9 @@ describe('PPU BG1 base and scroll registers', () => {
     w8(bus, mmio(0x07), 0x08);
     expect(ppu.bg1MapBaseWord).toBe(0x0400);
 
-    // BG12NBA: BG1 uses LOW nibble; nibble=2 -> 2 * 0x1000 words = 0x2000 words
+    // BG12NBA: BG1 uses LOW nibble; nibble=2 -> 2 * 0x800 words = 0x1000 words
     w8(bus, mmio(0x0b), 0x02);
-    expect(ppu.bg1CharBaseWord).toBe(0x2000);
+    expect(ppu.bg1CharBaseWord).toBe(0x1000);
 
     // BG1HOFS: write low then high (only bits 0-2 used)
     w8(bus, mmio(0x0d), 0x34);

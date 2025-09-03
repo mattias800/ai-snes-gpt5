@@ -40,7 +40,7 @@ describe('HDMA-like mid-scanline changes (simulated by segment rendering)', () =
     w8(bus, mmio(0x2d), 0x02);
 
     // BG1/BG2 char bases = 0x1000; BG2 map base separate
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     w8(bus, mmio(0x08), 0x04);
 
     // Tile data
@@ -90,7 +90,7 @@ describe('HDMA-like mid-scanline changes (simulated by segment rendering)', () =
     w8(bus, mmio(0x2d), 0x02); // BG2 subscreen (not used here)
 
     // Char bases and BG2 map base
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     w8(bus, mmio(0x08), 0x04);
 
     writeSolidTile(bus);
@@ -135,7 +135,7 @@ describe('HDMA-like mid-scanline changes (simulated by segment rendering)', () =
     w8(bus, mmio(0x2d), 0x02);
 
     // Char bases, BG2 map base
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     w8(bus, mmio(0x08), 0x04);
 
     writeSolidTile(bus);

@@ -33,7 +33,7 @@ describe('Frame RGBA: BG1 16x16 tile with H-flip moves red half to the other sid
 
     // BG1 bases and VMAIN
     w8(bus, mmio(0x07), 0x00); // map base 0x0000 32x32
-    w8(bus, mmio(0x0b), 0x01); // BG1 char base nibble=1 -> 0x1000 words
+    w8(bus, mmio(0x0b), 0x02); // BG1 char base nibble=2 -> 0x1000 words
     w8(bus, mmio(0x15), 0x80); // VMAIN +1 word after HIGH
 
     // Tile graphics: create a 16x16 composed of four 8x8 tiles (indices 0,1,16,17)

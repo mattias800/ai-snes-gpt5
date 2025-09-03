@@ -40,7 +40,7 @@ describe('BG2 window combine modes (A/B, applyInside=1)', () => {
     w8(bus, mmio(0x07), 0x04);
     w8(bus, mmio(0x08), 0x00);
     // Char bases 0x1000 for both
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
 
     writeSolid4bppTile(bus);
 

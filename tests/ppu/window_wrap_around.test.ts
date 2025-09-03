@@ -38,7 +38,7 @@ describe('Window wrap-around (left > right) behavior (simplified)', () => {
     w8(bus, mmio(0x2d), 0x02);
 
     // Char bases, BG2 map base
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     w8(bus, mmio(0x08), 0x04);
 
     writeSolidTile(bus);

@@ -14,19 +14,22 @@ function mkBus() {
 
 function scale5To8(v: number) { return Math.floor((v * 255) / 31); }
 
-function writeSolid4bppTile1(bus: SNESBus) {
-  // Create 4bpp tile index 1 at char base 0x1000: plane0 rows = 0xFF
+function writeSolid4bppTile1(bus: SNESBus, charBase: number) {
+  // Create 4bpp tile index 1 at specified char base: plane0 rows = 0xFF
+  // 4bpp tile is 32 bytes (16 words), tile 1 starts at +16 words
   for (let y = 0; y < 8; y++) {
-    // plane0 row
-    w8(bus, mmio(0x16), (0x1000 + 16 + y) & 0xff);
-    w8(bus, mmio(0x17), ((0x1000 + 16 + y) >>> 8) & 0xff);
-    w8(bus, mmio(0x18), 0xff);
-    w8(bus, mmio(0x19), 0x00);
-    // plane1 row
-    w8(bus, mmio(0x16), (0x1000 + 16 + 8 + y) & 0xff);
-    w8(bus, mmio(0x17), ((0x1000 + 16 + 8 + y) >>> 8) & 0xff);
-    w8(bus, mmio(0x18), 0x00);
-    w8(bus, mmio(0x19), 0x00);
+    // Planes 0/1 for row y (interleaved pairs)
+    w8(bus, mmio(0x16), ((charBase + 16 + y*2) & 0xff));
+    w8(bus, mmio(0x17), (((charBase + 16 + y*2) >>> 8) & 0xff));
+    w8(bus, mmio(0x18), 0xff); // plane0 = 0xFF
+    w8(bus, mmio(0x19), 0x00); // plane1 = 0x00
+  }
+  // Planes 2/3 for all rows
+  for (let y = 0; y < 8; y++) {
+    w8(bus, mmio(0x16), ((charBase + 16 + 8 + y*2) & 0xff));
+    w8(bus, mmio(0x17), (((charBase + 16 + 8 + y*2) >>> 8) & 0xff));
+    w8(bus, mmio(0x18), 0x00); // plane2 = 0x00
+    w8(bus, mmio(0x19), 0x00); // plane3 = 0x00
   }
 }
 
@@ -42,8 +45,9 @@ describe('Color math half rounding exactness (add/sub)', () => {
     w8(bus, mmio(0x2c), 0x01);
     // char/map
     w8(bus, mmio(0x07), 0x00);
-    w8(bus, mmio(0x0b), 0x20);
-    writeSolid4bppTile1(bus);
+    // BG12NBA: Set BG1 char base to 0x1000 (nibble 2 with new shift)
+    w8(bus, mmio(0x0b), 0x02);
+    writeSolid4bppTile1(bus, 0x1000);
     // tilemap entry -> tile 1 pal0
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x00);
     // Main color: set CGRAM index1 to R=7,G=15,B=23 (BGR555: B=23,G=15,R=7)
@@ -77,8 +81,10 @@ describe('Color math half rounding exactness (add/sub)', () => {
     w8(bus, mmio(0x05), 0x01);
     // BG1 main
     w8(bus, mmio(0x2c), 0x01);
-    w8(bus, mmio(0x07), 0x00); w8(bus, mmio(0x0b), 0x20);
-    writeSolid4bppTile1(bus);
+    w8(bus, mmio(0x07), 0x00); 
+    // BG12NBA: Set BG1 char base to 0x1000 (nibble 2)
+    w8(bus, mmio(0x0b), 0x02);
+    writeSolid4bppTile1(bus, 0x1000);
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x00);
     // Main color: R=5,G=2,B=1
     const R=5,G=2,B=1; const bgr15 = (R<<10)|(G<<5)|(B);

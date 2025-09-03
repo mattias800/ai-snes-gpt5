@@ -49,8 +49,8 @@ describe('BG4 XNOR+invert applyInside=0 across wrap-around', () => {
     w8(bus, mmio(0x2c), 0x08);
     w8(bus, mmio(0x2d), 0x02);
     // BG4 map 0, char 0x0800; BG2 map 0x0200, char 0x1000
-    w8(bus, mmio(0x0a), 0x00); w8(bus, mmio(0x0c), 0x10);
-    w8(bus, mmio(0x08), 0x04); w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0a), 0x00); w8(bus, mmio(0x0c), 0x20);
+    w8(bus, mmio(0x08), 0x04); w8(bus, mmio(0x0b), 0x22);
 
     writeBG4SolidTile0(bus, 0x1000);
     writeBG2SolidTile1(bus);

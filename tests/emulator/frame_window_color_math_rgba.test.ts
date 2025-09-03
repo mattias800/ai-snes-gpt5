@@ -23,7 +23,7 @@ describe('Frame RGBA: window + fixed-color add-half over BG1 (inside vs outside)
 
     // BG1 bases and VMAIN
     w8(bus, mmio(0x07), 0x00); // map base 0x0000
-    w8(bus, mmio(0x0b), 0x10); // char base 0x0800 words
+    w8(bus, mmio(0x0b), 0x01); // char base 0x0800 words
     w8(bus, mmio(0x15), 0x00);
 
     // Write red 4bpp tile 0 at 0x0800 (palette index 1 solid)

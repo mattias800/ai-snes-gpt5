@@ -38,7 +38,7 @@ describe('HDMA-like mid-scanline window combine changes (simulated)', () => {
     w8(bus, mmio(0x2d), 0x02);
 
     // Char bases and BG2 map base
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     w8(bus, mmio(0x08), 0x04);
 
     // Tiles
@@ -92,7 +92,7 @@ describe('HDMA-like mid-scanline window combine changes (simulated)', () => {
     w8(bus, mmio(0x05), 0x01);
     w8(bus, mmio(0x2c), 0x01);
     w8(bus, mmio(0x2d), 0x02);
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     w8(bus, mmio(0x08), 0x04);
 
     writeSolid4bppTile(bus);

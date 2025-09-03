@@ -35,7 +35,7 @@ describe('Two-window combine modes for BG1 (simplified)', () => {
     w8(bus, mmio(0x2c), 0x01);
     w8(bus, mmio(0x2d), 0x02);
     // Char bases 0x1000
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     // BG2 map base at 0x0400 bytes to avoid overlap
     w8(bus, mmio(0x08), 0x04);
     // Tiles

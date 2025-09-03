@@ -35,7 +35,7 @@ describe('Color math half rounding exactness (add/sub)', () => {
         w8(bus, mmio(0x2c), 0x01);
         // char/map
         w8(bus, mmio(0x07), 0x00);
-        w8(bus, mmio(0x0b), 0x20);
+        w8(bus, mmio(0x0b), 0x02);
         writeSolid4bppTile1(bus);
         // tilemap entry -> tile 1 pal0
         w8(bus, mmio(0x16), 0x00);
@@ -72,7 +72,7 @@ describe('Color math half rounding exactness (add/sub)', () => {
         // BG1 main
         w8(bus, mmio(0x2c), 0x01);
         w8(bus, mmio(0x07), 0x00);
-        w8(bus, mmio(0x0b), 0x20);
+        w8(bus, mmio(0x0b), 0x02);
         writeSolid4bppTile1(bus);
         w8(bus, mmio(0x16), 0x00);
         w8(bus, mmio(0x17), 0x00);

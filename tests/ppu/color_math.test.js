@@ -18,7 +18,7 @@ describe('Color math: add/sub half with backdrop (simplified)', () => {
         w8(bus, mmio(0x2c), 0x01);
         // BG1 setup: tile1 solid at map (0,0), char base 0x1000
         w8(bus, mmio(0x07), 0x00);
-        w8(bus, mmio(0x0b), 0x20);
+        w8(bus, mmio(0x0b), 0x02);
         for (let y = 0; y < 8; y++) {
             w8(bus, mmio(0x16), (0x1000 + 16 + y) & 0xff);
             w8(bus, mmio(0x17), ((0x1000 + 16 + y) >>> 8) & 0xff);
@@ -55,7 +55,7 @@ describe('Color math: add/sub half with backdrop (simplified)', () => {
         w8(bus, mmio(0x2c), 0x01);
         // BG1: tile1 solid with red max so subtraction from blue backdrop does nothing to red
         w8(bus, mmio(0x07), 0x00);
-        w8(bus, mmio(0x0b), 0x20);
+        w8(bus, mmio(0x0b), 0x02);
         for (let y = 0; y < 8; y++) {
             w8(bus, mmio(0x16), (0x1000 + 16 + y) & 0xff);
             w8(bus, mmio(0x17), ((0x1000 + 16 + y) >>> 8) & 0xff);

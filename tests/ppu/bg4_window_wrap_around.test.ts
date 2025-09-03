@@ -56,9 +56,9 @@ describe('BG4 window wrap-around behavior', () => {
     w8(bus, mmio(0x2c), 0x08);
     w8(bus, mmio(0x2d), 0x02);
     w8(bus, mmio(0x0a), 0x00); // BG4 map base 0
-    w8(bus, mmio(0x0c), 0x10); // BG4 char 0x0800
+    w8(bus, mmio(0x0c), 0x20); // BG4 char 0x0800
     w8(bus, mmio(0x08), 0x04); // BG2 map base word 0x0200
-    w8(bus, mmio(0x0b), 0x11); // BG2 char 0x1000
+    w8(bus, mmio(0x0b), 0x22); // BG2 char 0x1000
 
     writeBG4SolidTile0(bus, 0x1000);
     writeBG2SolidTile1(bus);

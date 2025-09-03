@@ -36,7 +36,7 @@ describe('Window boundaries are inclusive (left and right)', () => {
     w8(bus, mmio(0x05), 0x01);
     w8(bus, mmio(0x2c), 0x01);
     w8(bus, mmio(0x2d), 0x02);
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     w8(bus, mmio(0x08), 0x04);
     writeSolid(bus);
     // BG1 red at 0, BG2 green at word 0x0200
@@ -68,7 +68,7 @@ describe('Window boundaries are inclusive (left and right)', () => {
     w8(bus, mmio(0x05), 0x01);
     w8(bus, mmio(0x2c), 0x01);
     w8(bus, mmio(0x2d), 0x02);
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     w8(bus, mmio(0x08), 0x04);
     writeSolid(bus);
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x00);

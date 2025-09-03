@@ -38,9 +38,9 @@ describe('BG4 color math mask (per-layer) behavior', () => {
     w8(bus, mmio(0x2c), 0x08);
     w8(bus, mmio(0x2d), 0x02);
     // BG4 map base 0, char base 0x1000 (BG34NBA: high nibble = BG4)
-    w8(bus, mmio(0x0a), 0x00); w8(bus, mmio(0x0c), 0x10);
+    w8(bus, mmio(0x0a), 0x00); w8(bus, mmio(0x0c), 0x20);
     // BG2 map base 0x0200, char base 0x1000
-    w8(bus, mmio(0x08), 0x04); w8(bus, mmio(0x0b), 0x10);
+    w8(bus, mmio(0x08), 0x04); w8(bus, mmio(0x0b), 0x20);
     // Data
     writeBG4SolidTile0(bus, 0x1000);
     // Write BG2 solid tile 1 (2bpp)

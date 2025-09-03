@@ -33,7 +33,7 @@ describe('Window edges for combine modes (AND/XOR/XNOR)', () => {
     w8(bus, mmio(0x05), 0x01);
     w8(bus, mmio(0x2c), 0x01); // BG1 main
     w8(bus, mmio(0x2d), 0x02); // BG2 sub
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     w8(bus, mmio(0x08), 0x04);
     writeSolid(bus);
     // BG1 red, BG2 green

@@ -15,7 +15,7 @@ describe('PPU INIDISP brightness and forced blank', () => {
         const ppu = bus.getPPU();
         // Setup BG1 map/char and a tile with all pixels index 1
         w8(bus, mmio(0x07), 0x00); // BG1SC map base 0
-        w8(bus, mmio(0x0b), 0x20); // BG1 char base 0x1000 words (nibble 2)
+        w8(bus, mmio(0x0b), 0x02); // BG1 char base 0x1000 words (nibble 2)
         // Tile plane0 = 0xFF for all rows (pix=1), other planes 0 at char base 0x1000
         for (let y = 0; y < 8; y++) {
             w8(bus, mmio(0x16), (0x1000 + y) & 0xff);

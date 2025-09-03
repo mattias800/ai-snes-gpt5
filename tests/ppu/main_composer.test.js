@@ -19,7 +19,7 @@ describe('Main screen composer: BG1 over BG2 (simplified)', () => {
         w8(bus, mmio(0x2c), 0x03);
         // BG1: map base 0x0000, char base 0x1000; tile 0 has pix=0 -> transparent
         w8(bus, mmio(0x07), 0x00);
-        w8(bus, mmio(0x0b), 0x20);
+        w8(bus, mmio(0x0b), 0x02);
         // Write tile 0: all planes zero => pix=0
         for (let y = 0; y < 16; y++) {
             w8(bus, mmio(0x16), (0x1000 + y) & 0xff);
@@ -40,7 +40,7 @@ describe('Main screen composer: BG1 over BG2 (simplified)', () => {
         }
         // BG2: map base 0x0400 words, char base 0x2000 words; tile 0 has pix=1 (solid)
         w8(bus, mmio(0x08), 0x04); // 0x0400 bytes => 0x0200 words; but our renderer assumes base is words directly -> use map entries at 0
-        w8(bus, mmio(0x0b), 0x20); // keep BG1 char base; BG2 char base is low nibble of $210B (we used only BG2 indices renderer reading bg2CharBaseWord)
+        w8(bus, mmio(0x0b), 0x02); // keep BG1 char base; BG2 char base is low nibble of $210B (we used only BG2 indices renderer reading bg2CharBaseWord)
         // Actually set BG2 char base via nibble of $210B low: write 0x02 already set -> 0x1000 words; bump to 0x2000 by writing $210B low nibble 4 (but that would also move BG1)
         // Simpler: keep BG2 char base same as BG1 (0x1000) and map tile index 1 for BG2 to use our solid tile1.
         // BG1 tilemap: left half tile1 (solid), right half tile0 (transparent)

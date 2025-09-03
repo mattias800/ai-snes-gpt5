@@ -40,7 +40,7 @@ describe('Subscreen window combine modes (CGWSEL bit1, applyInside=1)', () => {
     w8(bus, mmio(0x07), 0x00);
     w8(bus, mmio(0x08), 0x04);
     // Char bases 0x1000
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
 
     writeSolid4bppTile(bus);
     // BG1 tile at 0 -> tile1 pal0 (red main)

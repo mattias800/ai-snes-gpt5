@@ -38,7 +38,7 @@ describe('OBJ wrap-around windows with invert and clip/prevent modes', () => {
     w8(bus, mmio(0x02), 0x00);
     w8(bus, mmio(0x04), 0x00); w8(bus, mmio(0x04), 0x00); w8(bus, mmio(0x04), 0x01); w8(bus, mmio(0x04), 0x00);
     // BG2 green background (tile1 pal group1 at map 0)
-    w8(bus, mmio(0x0b), 0x11); // BG2 char 0x1000
+    w8(bus, mmio(0x0b), 0x22); // BG2 char 0x1000
     w8(bus, mmio(0x08), 0x00); // BG2 map 0
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x04);
     // Palettes: OBJ red (index1), BG2 green (index17)

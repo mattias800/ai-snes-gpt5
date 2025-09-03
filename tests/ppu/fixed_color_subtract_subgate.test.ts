@@ -36,7 +36,7 @@ describe('Subtract mode with fixed-color subscreen and subGate toggles', () => {
     // BG1/BG2 char/map
     w8(bus, mmio(0x07), 0x00);
     w8(bus, mmio(0x08), 0x04);
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
 
     writeSolid4bpp(bus);
 

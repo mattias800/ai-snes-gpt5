@@ -33,7 +33,7 @@ describe('Fixed color variants (multi-channel, full/half)', () => {
     w8(bus, mmio(0x05), 0x01);
     w8(bus, mmio(0x2c), 0x01); // BG1 main
     w8(bus, mmio(0x2d), 0x00); // no subscreen
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     writeSolid(bus);
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x00);
     w8(bus, mmio(0x21), 2);  w8(bus, mmio(0x22), 0x00); w8(bus, mmio(0x22), 0x7c); // red main

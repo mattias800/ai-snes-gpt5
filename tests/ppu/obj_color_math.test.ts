@@ -37,7 +37,7 @@ describe('OBJ + color math (minimal)', () => {
 
     // Setup BG2 subscreen green pixel at (0,0)
     w8(bus, mmio(0x08), 0x00); // BG2 map base 0
-    w8(bus, mmio(0x0b), 0x11); // BG1/BG2 char base 0x1000
+    w8(bus, mmio(0x0b), 0x22); // BG1/BG2 char base 0x1000
     writeSolid4bppTile(bus);
     // BG2 tilemap entry 0 -> tile1, pal group 1 (so CGRAM index 16+pix)
     w8(bus, mmio(0x16), 0x00);

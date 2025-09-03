@@ -35,7 +35,7 @@ describe('Subscreen window gating (CGWSEL bit1)', () => {
     // BG1 main, BG2 subscreen
     w8(bus, mmio(0x2c), 0x01);
     w8(bus, mmio(0x2d), 0x02);
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     // BG2 map base separate
     w8(bus, mmio(0x08), 0x04);
 
@@ -82,7 +82,7 @@ describe('Subscreen window gating (CGWSEL bit1)', () => {
     // BG1 main, BG2 subscreen
     w8(bus, mmio(0x2c), 0x01);
     w8(bus, mmio(0x2d), 0x02);
-    w8(bus, mmio(0x0b), 0x11);
+    w8(bus, mmio(0x0b), 0x22);
     w8(bus, mmio(0x08), 0x04);
 
     // Tiles

@@ -40,7 +40,7 @@ describe('BG4 clip-to-black vs prevent-math', () => {
     w8(bus, mmio(0x2c), 0x08);
     w8(bus, mmio(0x2d), 0x00);
     // BG4 map base 0, char base 0x1000 (BG34NBA: high nibble = BG4, low nibble = BG3)
-    w8(bus, mmio(0x0a), 0x00); w8(bus, mmio(0x0c), 0x10);
+    w8(bus, mmio(0x0a), 0x00); w8(bus, mmio(0x0c), 0x20);
     writeBG4SolidTile0(bus, 0x1000);
     // BG4 tilemap
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x00); w8(bus, mmio(0x19), 0x00);
@@ -73,7 +73,7 @@ describe('BG4 clip-to-black vs prevent-math', () => {
     // BG4 main only
     w8(bus, mmio(0x2c), 0x08); w8(bus, mmio(0x2d), 0x00);
     // BG4 map base 0, char base 0x1000 (BG34NBA: high nibble = BG4)
-    w8(bus, mmio(0x0a), 0x00); w8(bus, mmio(0x0c), 0x10);
+    w8(bus, mmio(0x0a), 0x00); w8(bus, mmio(0x0c), 0x20);
     writeBG4SolidTile0(bus, 0x1000);
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x00); w8(bus, mmio(0x19), 0x00);
     // Palette index1 red

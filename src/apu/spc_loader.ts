@@ -42,6 +42,40 @@ export function loadSpcIntoApu(apu: APUDevice, buf: Buffer): void {
   // Apply KOF then KON as captured
   dspWriteAddr(0x5c); dspWriteData(kof);
   dspWriteAddr(0x4c); dspWriteData(kon);
+  
+  // For already-active voices, restore their envelope state from ENVX registers
+  // This is a workaround since we can't restore the exact internal envelope state
+  try {
+    const voices = anyApu['dsp']?.['voices'];
+    if (voices && Array.isArray(voices)) {
+      for (let i = 0; i < 8; i++) {
+        if (kon & (1 << i)) {
+          const v = voices[i];
+          if (v) {
+            // Read the ENVX value from the SPC snapshot (voice reg offset 0x08)
+            const envxAddr = (i << 4) | 0x08;
+            const envx = buf[dspBase + envxAddr] & 0x7f;
+            // Convert from 7-bit ENVX to 0..1 range
+            v.env = envx / 127;
+            
+            // Set envelope phase based on ENVX value
+            if (v.env === 0) {
+              // If ENVX is 0, the voice was just keyed on - start attack phase
+              v.envPhase = 1; // attack phase
+            } else if (v.env >= 0.95) {
+              // Near max, likely in attack or just finished attack
+              v.envPhase = 2; // decay phase
+            } else {
+              // Middle values, likely in sustain
+              v.envPhase = 3; // sustain phase
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore if private
+  }
 
   // Ensure FLG reset/mute are cleared post-load so output is audible
   // Preserve other FLG bits from snapshot (e.g., echo write disable)

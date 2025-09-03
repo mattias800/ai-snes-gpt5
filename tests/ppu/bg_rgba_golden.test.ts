@@ -20,7 +20,7 @@ describe('Golden RGBA hash for BG1 render', () => {
 
     // Setup: map base 0x0000, char base 0x1000
     w8(bus, mmio(0x07), 0x00);
-    w8(bus, mmio(0x0b), 0x20);
+    w8(bus, mmio(0x0b), 0x02);
 
     // Tile: left half red (pix=1), right half 0; rows repeated
     w8(bus, mmio(0x15), 0x00);

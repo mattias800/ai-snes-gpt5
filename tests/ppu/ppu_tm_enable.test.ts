@@ -19,7 +19,7 @@ describe('PPU TM/TS layer enable (main screen BG1)', () => {
 
     // Build a visible 8x8 pattern at BG1 char base 0x1000 and map at 0
     w8(bus, mmio(0x07), 0x00);
-    w8(bus, mmio(0x0b), 0x01);
+    w8(bus, mmio(0x0b), 0x02);
     for (let y = 0; y < 8; y++) {
       w8(bus, mmio(0x16), (0x1000 + y) & 0xff);
       w8(bus, mmio(0x17), ((0x1000 + y) >>> 8) & 0xff);
