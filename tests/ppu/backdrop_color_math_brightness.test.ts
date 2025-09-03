@@ -45,7 +45,7 @@ describe('Backdrop color math gating and brightness after math', () => {
 
     // Setup BG1 green tile on subscreen
     w8(bus, mmio(0x07), 0x00); // BG1 map base 0
-    w8(bus, mmio(0x0b), 0x20); // BG1 char base 0x1000 words
+    w8(bus, mmio(0x0b), 0x01); // BG1 char base 0x1000 words
     writeSolid(bus);
     // BG1 tile 1 at map 0
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x01); w8(bus, mmio(0x19), 0x00);

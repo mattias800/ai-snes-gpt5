@@ -14,10 +14,10 @@ function r8(bus: SNESBus, addr: number) { return bus.read8(addr); }
 const mmio = (reg: number) => (0x00 << 16) | (0x2100 + (reg & 0xff));
 
 describe('PPU ports: VRAM/CGRAM/OAM basic behaviors', () => {
-  it('VRAM write/read with VMAIN increment after high (bit7=0) and step=+1 word', () => {
+  it('VRAM write/read with VMAIN increment after high (bit7=1) and step=+1 word', () => {
     const bus = new SNESBus(mkCart(0x20000));
-    // Set VMAIN: bit7=0 (inc after high), step=0 (+1 word)
-    w8(bus, mmio(0x15), 0x00);
+    // Set VMAIN: bit7=1 (inc after high), step=0 (+1 word)
+    w8(bus, mmio(0x15), 0x80);
     // Set VADDR to 0x1234
     w8(bus, mmio(0x16), 0x34);
     w8(bus, mmio(0x17), 0x12);

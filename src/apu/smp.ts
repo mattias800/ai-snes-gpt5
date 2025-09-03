@@ -139,6 +139,15 @@ export class SMP {
     if (val & 0x8000) this.PSW |= SMP.N; else this.PSW &= ~SMP.N;
   }
 
+  private hleIplIrqStub(): void {
+    // Minimal IPL IRQ stub HLE: acknowledge timers by reading their counters
+    try {
+      this.read8(0x00fd); this.read8(0x00fe); this.read8(0x00ff);
+      // Touch mailbox ports (non-destructive reads) to emulate stub polling
+      this.read8(0x00f4); this.read8(0x00f5); this.read8(0x00f6); this.read8(0x00f7);
+    } catch {}
+  }
+
   stepInstruction(): number {
     // Handle low-power states
     if (!this.lowPowerDisabled) {
@@ -160,16 +169,18 @@ export class SMP {
       this.PSW = (this.PSW | SMP.I) & 0xff;
       const vLo = this.read8(0xffde) & 0xff;
       const vHi = this.read8(0xffdf) & 0xff;
-      if (this.enableNullVectorIplHle && vLo === 0xff && vHi === 0xff) {
-        // HLE: immediately return from IRQ when vector is null ($FFFF)
+      const vec = ((vHi << 8) | vLo) & 0xffff;
+      if (this.enableNullVectorIplHle && (vec === 0xffff || vec === 0x00f0)) {
+        // HLE: emulate minimal IPL IRQ stub behavior, then return from IRQ
+        if (vec === 0x00f0) this.hleIplIrqStub();
         this.PSW = this.pop8() & 0xff; // restore PSW
         const retLo = this.pop8() & 0xff;
         const retHi = this.pop8() & 0xff;
         this.PC = ((retHi << 8) | retLo) & 0xffff;
         this.irqPending = false;
-        return 14; // entry (8) + RETI (6)
+        return 16; // entry (8) + minimal stub + RETI (~8)
       }
-      this.PC = ((vHi << 8) | vLo) & 0xffff;
+      this.PC = vec;
       this.irqPending = false;
       return 8;
     }
@@ -214,7 +225,7 @@ export class SMP {
         this.setZN8(this.A);
         return 4;
       }
-      // mov A,abs+X
+      // LDA $abs,X — bsnes 0xF5
       case 0xf5: {
         const lo = this.read8(this.PC); const hi = this.read8((this.PC + 1) & 0xffff);
         this.PC = (this.PC + 2) & 0xffff;
@@ -224,7 +235,15 @@ export class SMP {
         this.setZN8(this.A);
         return 5;
       }
-      // mov dp,A (flags unaffected)
+      // MOV $abs,A (flags unaffected) — canonical 0xC4
+      case 0xc4: {
+        const lo = this.read8(this.PC); const hi = this.read8((this.PC + 1) & 0xffff);
+        this.PC = (this.PC + 2) & 0xffff;
+        const addr = ((hi << 8) | lo) & 0xffff;
+        this.write8(addr, this.A & 0xff);
+        return 5;
+      }
+      // MOV $dp,A (flags unaffected) — canonical 0xC5
       case 0xc5: {
         const dp = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
         this.writeDP(dp, this.A & 0xff);
@@ -238,19 +257,11 @@ export class SMP {
         this.setZN8(this.A);
         return 4;
       }
-      // mov dp+X,A (flags unaffected)
+      // MOV $dp+X,A (flags unaffected) — canonical 0xD5
       case 0xd5: {
         const dp = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
         this.writeDPx(dp, this.X, this.A & 0xff);
         return 4;
-      }
-      // mov abs,A (flags unaffected)
-      case 0xc4: {
-        const lo = this.read8(this.PC); const hi = this.read8((this.PC + 1) & 0xffff);
-        this.PC = (this.PC + 2) & 0xffff;
-        const addr = ((hi << 8) | lo) & 0xffff;
-        this.write8(addr, this.A & 0xff);
-        return 5;
       }
       // --- Indirect A forms ---
       // MOV A,(X) -> reads from direct page at (DP + X)
@@ -291,14 +302,14 @@ export class SMP {
       }
 
       // --- MOV X <-> memory ---
-      // MOV X,dp
+      // LDX dp
       case 0xf8: {
         const dp = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
         this.X = this.readDP(dp) & 0xff;
         this.setZN8(this.X);
         return 3;
       }
-      // MOV X,abs
+      // LDX $abs — canonical 0xF9
       case 0xf9: {
         const lo = this.read8(this.PC); const hi = this.read8((this.PC + 1) & 0xffff);
         this.PC = (this.PC + 2) & 0xffff;
@@ -307,11 +318,10 @@ export class SMP {
         this.setZN8(this.X);
         return 4;
       }
-      // MOV X,dp+Y
+      // LDX $dp+Y — canonical 0xFB
       case 0xfb: {
         const dp = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
-        const v = this.readDPx(dp, this.Y);
-        this.X = v & 0xff;
+        this.X = this.readDPx(dp, this.Y) & 0xff;
         this.setZN8(this.X);
         return 4;
       }
@@ -321,7 +331,7 @@ export class SMP {
         this.writeDP(dp, this.X & 0xff);
         return 4;
       }
-      // MOV abs,X (flags unaffected)
+      // STX $abs (flags unaffected) — canonical 0xD9
       case 0xd9: {
         const lo = this.read8(this.PC); const hi = this.read8((this.PC + 1) & 0xffff);
         this.PC = (this.PC + 2) & 0xffff;
@@ -329,7 +339,7 @@ export class SMP {
         this.write8(addr, this.X & 0xff);
         return 5;
       }
-      // MOV dp+Y,X (flags unaffected)
+      // STX $dp+Y (flags unaffected) — canonical 0xDB
       case 0xdb: {
         const dp = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
         this.writeDPx(dp, this.Y, this.X & 0xff);
@@ -337,14 +347,14 @@ export class SMP {
       }
 
       // --- MOV Y <-> memory ---
-      // MOV Y,dp
+      // LDY $dp — canonical 0xF6
       case 0xf6: {
         const dp = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
         this.Y = this.readDP(dp) & 0xff;
         this.setZN8(this.Y);
         return 3;
       }
-      // MOV Y,abs (canonical opcode 0xEC)
+      // LDY $abs — canonical 0xEC
       case 0xec: {
         const lo = this.read8(this.PC); const hi = this.read8((this.PC + 1) & 0xffff);
         this.PC = (this.PC + 2) & 0xffff;
@@ -353,41 +363,33 @@ export class SMP {
         this.setZN8(this.Y);
         return 4;
       }
-      // MOV Y,dp+X
+      // LDY $dp+X — canonical 0xFA
       case 0xfa: {
         const dp = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
-        const v = this.readDPx(dp, this.X);
-        this.Y = v & 0xff;
+        const v = this.readDPx(dp, this.X) & 0xff;
+        this.Y = v;
         this.setZN8(this.Y);
         return 4;
       }
-      // MOV dp,Y (flags unaffected) — canonical encoding 0xD6
+      // STY $dp (flags unaffected) — canonical 0xD6
       case 0xd6: {
         const dp = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
         this.writeDP(dp, this.Y & 0xff);
+        return 3;
+      }
+      // STY $dp+X (flags unaffected) — canonical 0xD7
+      case 0xd7: {
+        const dp = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
+        this.writeDPx(dp, this.X, this.Y & 0xff);
         return 4;
       }
-      // MOV abs,Y (flags unaffected) canonical opcode 0xCC
+      // STY $abs (flags unaffected) — canonical 0xCC
       case 0xcc: {
         const lo = this.read8(this.PC); const hi = this.read8((this.PC + 1) & 0xffff);
         this.PC = (this.PC + 2) & 0xffff;
         const addr = ((hi << 8) | lo) & 0xffff;
         this.write8(addr, this.Y & 0xff);
         return 5;
-      }
-      // MOV dp+X,Y (flags unaffected)
-      case 0xd7: {
-        const dp = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
-        this.writeDPx(dp, this.X, this.Y & 0xff);
-        return 5;
-      }
-      // mov dp,#imm (0x8F) flags unaffected
-      case 0x8f: {
-        const dp = this.read8(this.PC);
-        const imm = this.read8((this.PC + 1) & 0xffff);
-        this.PC = (this.PC + 2) & 0xffff;
-        this.writeDP(dp, imm & 0xff);
-        return 4;
       }
 
       // --- Register immediates and transfers ---
@@ -502,6 +504,14 @@ export class SMP {
         this.setZN8(this.A);
         return 5;
       }
+      // OR A,dp+Y
+      case 0x16: {
+        const dp = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
+        const v = this.readDPx(dp, this.Y) & 0xff;
+        this.A = (this.A | v) & 0xff;
+        this.setZN8(this.A);
+        return 4;
+      }
       // OR A,[$dp]+Y
       case 0x17: {
         const dp = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
@@ -529,6 +539,59 @@ export class SMP {
         this.PC = (this.PC + 2) & 0xffff;
         const m = this.readDP(dp) & 0xff;
         const r = (m | imm) & 0xff;
+        this.writeDP(dp, r);
+        this.setZN8(r);
+        return 5;
+      }
+      // AND dp,#imm — canonical 0x38
+      case 0x38: {
+        const dp = this.read8(this.PC); const imm = this.read8((this.PC + 1) & 0xffff);
+        this.PC = (this.PC + 2) & 0xffff;
+        const m = this.readDP(dp) & 0xff;
+        const r = (m & imm) & 0xff;
+        this.writeDP(dp, r);
+        this.setZN8(r);
+        return 5;
+      }
+      // EOR dp,#imm — canonical 0x58
+      case 0x58: {
+        const dp = this.read8(this.PC); const imm = this.read8((this.PC + 1) & 0xffff);
+        this.PC = (this.PC + 2) & 0xffff;
+        const m = this.readDP(dp) & 0xff;
+        const r = (m ^ imm) & 0xff;
+        this.writeDP(dp, r);
+        this.setZN8(r);
+        return 5;
+      }
+      // ADC dp,#imm — canonical 0x98
+      case 0x98: {
+        const dp = this.read8(this.PC); const imm = this.read8((this.PC + 1) & 0xffff);
+        this.PC = (this.PC + 2) & 0xffff;
+        const m = this.readDP(dp) & 0xff; const b = imm & 0xff; const c = (this.PSW & SMP.C) ? 1 : 0;
+        const sum = m + b + c;
+        const r = sum & 0xff;
+        if (sum > 0xff) this.PSW |= SMP.C; else this.PSW &= ~SMP.C;
+        const h = ((m & 0x0f) + (b & 0x0f) + c) > 0x0f;
+        if (h) this.PSW |= SMP.H; else this.PSW &= ~SMP.H;
+        const v = (~(m ^ b) & (m ^ r) & 0x80) !== 0;
+        if (v) this.PSW |= SMP.V; else this.PSW &= ~SMP.V;
+        this.writeDP(dp, r);
+        this.setZN8(r);
+        return 5;
+      }
+      // SBC dp,#imm — canonical 0xB8
+      case 0xb8: {
+        const dp = this.read8(this.PC); const imm = this.read8((this.PC + 1) & 0xffff);
+        this.PC = (this.PC + 2) & 0xffff;
+        const m = this.readDP(dp) & 0xff; const k = imm & 0xff; const c = (this.PSW & SMP.C) ? 1 : 0;
+        const b = (k ^ 0xff) & 0xff;
+        const sum = m + b + c;
+        const r = sum & 0xff;
+        if (sum > 0xff) this.PSW |= SMP.C; else this.PSW &= ~SMP.C;
+        const noBorrow4 = ((m & 0x0f) - (k & 0x0f) - (1 - c)) >= 0;
+        if (noBorrow4) this.PSW |= SMP.H; else this.PSW &= ~SMP.H;
+        const v = ((m ^ k) & (m ^ r) & 0x80) !== 0;
+        if (v) this.PSW |= SMP.V; else this.PSW &= ~SMP.V;
         this.writeDP(dp, r);
         this.setZN8(r);
         return 5;
@@ -829,14 +892,13 @@ export class SMP {
         this.setZN8(r);
         return 2;
       }
-      // --- Compare X with direct page: CPX dp (opcode 0xC9) ---
-      case 0xc9: {
-        const dp = this.read8(this.PC); this.PC = (this.PC + 1) & 0xffff;
-        const x = this.X & 0xff; const m = this.readDP(dp) & 0xff;
-        const r = (x - m) & 0xff;
-        if (x >= m) this.PSW |= SMP.C; else this.PSW &= ~SMP.C;
-        this.setZN8(r);
-        return 3;
+      // Support alternative encoding used by some drivers: STX $abs at 0xC9 (alias of 0xD9)
+      case 0xc9: { // STX $abs (flags unaffected)
+        const lo = this.read8(this.PC); const hi = this.read8((this.PC + 1) & 0xffff);
+        this.PC = (this.PC + 2) & 0xffff;
+        const addr = ((hi << 8) | lo) & 0xffff;
+        this.write8(addr, this.X & 0xff);
+        return 5;
       }
 
       // --- Special op: XCN (nibble swap A) ---
@@ -893,20 +955,29 @@ export class SMP {
         const vLo = this.read8(0xffde) & 0xff;
         const vHi = this.read8(0xffdf) & 0xff;
         const vec = ((vHi << 8) | vLo) & 0xffff;
-        // HLE: if the vector is null (0xFFFF or 0x0000), immediately return from BRK
-        if (this.enableNullVectorIplHle && (vec === 0xffff || vec === 0x0000)) {
+        // HLE: if the vector is null (0xFFFF or 0x0000) or IPL stub (0x00F0), return immediately
+        if (this.enableNullVectorIplHle && (vec === 0xffff || vec === 0x0000 || vec === 0x00f0)) {
+          if (vec === 0x00f0) this.hleIplIrqStub();
           // Restore PSW and PC
           this.PSW = this.pop8() & 0xff;
           const retLo = this.pop8() & 0xff;
           const retHi = this.pop8() & 0xff;
           this.PC = ((retHi << 8) | retLo) & 0xffff;
-          return 8; // treat as BRK entry cost only
+          return 10; // BRK entry + minimal stub return
         }
         this.PC = vec;
         return 8;
       }
       case 0xef: { // SLEEP
         if (!this.lowPowerDisabled) this.sleeping = true;
+        return 2;
+      }
+      case 0xcb: { // WAI (wait for interrupt)
+        if (!this.lowPowerDisabled) this.sleeping = true;
+        return 2;
+      }
+      // Temporary stub: opcode 0xEB appears in IPL; treat as NOP until full implementation required
+      case 0xeb: {
         return 2;
       }
       case 0xff: { // STOP
@@ -1046,8 +1117,8 @@ export class SMP {
         this.setZN8(this.A);
         return 6;
       }
-      // ADC A,abs+Y
-      case 0x99: {
+      // ADC A,abs+Y — canonical 0x96 (per bsnes)
+      case 0x96: {
         const lo = this.read8(this.PC); const hi = this.read8((this.PC + 1) & 0xffff);
         this.PC = (this.PC + 2) & 0xffff;
         let addr = ((hi << 8) | lo) & 0xffff;
@@ -1514,6 +1585,14 @@ export class SMP {
         return 5;
       }
 
+      // MOV dp,#imm (write immediate to direct page; flags unaffected)
+      case 0x8f: {
+        const dp = this.read8(this.PC); const imm = this.read8((this.PC + 1) & 0xffff);
+        this.PC = (this.PC + 2) & 0xffff;
+        this.writeDP(dp, imm & 0xff);
+        return 5;
+      }
+
       // --- PSW control: clear/set P and C, enable/disable interrupts ---
       case 0x20: { // CLRP
         this.PSW &= ~SMP.P; return 2;
@@ -1619,8 +1698,7 @@ export class SMP {
         return 2;
       }
 
-      // --- JMP abs ---
-      case 0x5f: {
+      case 0x5f: { // JMP abs
         const lo = this.read8(this.PC); const hi = this.read8((this.PC + 1) & 0xffff);
         const addr = ((hi << 8) | lo) & 0xffff;
         this.PC = addr;
@@ -1653,16 +1731,16 @@ export class SMP {
         const lo = this.read8(vec);
         const hi = this.read8((vec + 1) & 0xffff);
         const target = ((hi << 8) | lo) & 0xffff;
-        // HLE: if vector is null (0x0000 or 0xFFFF), emulate a minimal IPL helper when enabled
-        if (this.enableNullVectorIplHle && (target === 0x0000 || target === 0xffff)) {
-          // Minimal helper set tailored for SPC rips that use TCALL to index tables
-          // n==1: A <- Y (common pattern before MOV X,A / MOV A,(X) to read DP[Y])
+        // HLE: if vector is null (0x0000 or 0xFFFF) or IPL IRQ stub ($00F0), emulate minimal behavior
+        if (this.enableNullVectorIplHle && (target === 0x0000 || target === 0xffff || target === 0x00f0)) {
+          // Minimal helpers tailored for SPC rips
           if (n === 0x1) {
+            // Common pattern: A <- Y before memory read indexed by X set from A; keep flags reasonable
             this.A = this.Y & 0xff;
             this.setZN8(this.A);
             return 2;
           }
-          // Default: treat as no-op
+          // Default HLE: treat as small NOP to avoid infinite recursion
           return 2;
         }
         const ret = this.PC & 0xffff;

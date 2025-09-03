@@ -25,7 +25,7 @@ describe('SPC700 cycle counts (smoke)', () => {
     apu.step(3);
     expect(apu.smp.A & 0xff).toBe(0x12);
     expect(apu.smp.lastCycles | 0).toBe(3);
-    // MOV $35,A
+    // STA $35
     apu.aram[pc + 2] = 0xC5; apu.aram[pc + 3] = 0x35;
     apu.smp.PC = pc + 2;
     apu.step(3);
@@ -43,7 +43,7 @@ describe('SPC700 cycle counts (smoke)', () => {
     apu.step(4);
     expect(apu.smp.A & 0xff).toBe(0x9C);
     expect(apu.smp.lastCycles | 0).toBe(4);
-    // MOV $3457,A
+    // STA $3457
     apu.aram[pc + 3] = 0xC4; apu.aram[pc + 4] = 0x57; apu.aram[pc + 5] = 0x34;
     apu.smp.PC = pc + 3;
     apu.step(5);
@@ -62,7 +62,7 @@ describe('SPC700 cycle counts (smoke)', () => {
     apu.step(4);
     expect(apu.smp.A & 0xff).toBe(0x77);
     expect(apu.smp.lastCycles | 0).toBe(4);
-    // MOV $41+X,A -> $43
+    // STA $41+X -> $43
     apu.aram[pc + 2] = 0xD5; apu.aram[pc + 3] = 0x41;
     apu.smp.PC = pc + 2;
     apu.step(4);

@@ -14,8 +14,8 @@ const mmio = (reg: number) => (0x00 << 16) | (0x2100 + (reg & 0xff));
 function w8(bus: SNESBus, addr: number, v: number) { bus.write8(addr, v); }
 
 function writeVRAMWord(bus: SNESBus, vaddr: number, word: number) {
-  // Set VMAIN to inc after high and step +1 word
-  w8(bus, mmio(0x15), 0x00);
+  // Set VMAIN to inc-after-high (bit7=1) and step +1 word
+  w8(bus, mmio(0x15), 0x80);
   w8(bus, mmio(0x16), vaddr & 0xff);
   w8(bus, mmio(0x17), (vaddr >>> 8) & 0xff);
   w8(bus, mmio(0x18), word & 0xff);
@@ -33,7 +33,7 @@ describe('PPU renderer: 4bpp tile decode to palette indices', () => {
     // hi0 = 0, hi1 = 0 for simplicity (2bpp checkerboard)
     for (let y = 0; y < 8; y++) {
       // Write low planes (plane0 in low byte, plane1 in high byte) to word address base + y
-      w8(bus, mmio(0x15), 0x00); // increment after high, step +1 word
+      w8(bus, mmio(0x15), 0x80); // increment after HIGH (bit7=1), step +1 word
       w8(bus, mmio(0x16), (0x0000 + y) & 0xff);
       w8(bus, mmio(0x17), ((0x0000 + y) >>> 8) & 0xff);
       // plane0 = 0xAA, plane1 = 0x00

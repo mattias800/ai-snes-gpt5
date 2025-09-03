@@ -30,7 +30,7 @@ describe('SMP memory move semantics', () => {
     apu.smp.A = 0x00; // value doesn't matter for PSW test
     apu.smp.PSW = 0x5A;
 
-    apu.aram[pc + 0] = 0xC5; apu.aram[pc + 1] = 0x40; // mov $40,a
+    apu.aram[pc + 0] = 0xC4; apu.aram[pc + 1] = 0x40; // sta $40
 
     apu.smp.PC = pc;
     apu.step(8);

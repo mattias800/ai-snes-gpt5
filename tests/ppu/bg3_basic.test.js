@@ -17,13 +17,12 @@ describe('BG3 2bpp basic render in composer (Mode 1-style)', () => {
         w8(bus, mmio(0x00), 0x0f);
         // Enable only BG3 on TM
         w8(bus, mmio(0x2c), 0x04);
-        // BG3 map base 0, char base 0x0800 words (just to diverge), but we will place tile at index 0
-        // For simplicity, keep char base at 0x0000 for BG3 too (no explicit reg; we use bg3CharBaseWord from $210C high nibble)
-        w8(bus, mmio(0x0c), 0x10); // BG3 char base nibble=1 -> 0x0800 words; BG4 nibble=0
+        // BG3 map base 0, char base 0x1000 words (BG3 uses LOW nibble of $210C)
+        w8(bus, mmio(0x0c), 0x01);
         // Create a 2bpp tile at BG3 char base: plane0 = 0xFF -> pix=1
         for (let y = 0; y < 8; y++) {
-            w8(bus, mmio(0x16), (0x0800 + y) & 0xff);
-            w8(bus, mmio(0x17), ((0x0800 + y) >>> 8) & 0xff);
+            w8(bus, mmio(0x16), (0x1000 + y) & 0xff);
+            w8(bus, mmio(0x17), ((0x1000 + y) >>> 8) & 0xff);
             w8(bus, mmio(0x18), 0xff);
             w8(bus, mmio(0x19), 0x00);
         }

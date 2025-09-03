@@ -20,7 +20,7 @@ describe('BG 4bpp tilemap renderer', () => {
     // Prepare a tile: plane0=0xAA for all rows; others zero => alternating 1/0 bits across each row
     for (let y = 0; y < 8; y++) {
       // low planes at word base + y
-      w8(bus, mmio(0x15), 0x00); // step +1 word
+      w8(bus, mmio(0x15), 0x80); // step +1 word (inc after HIGH)
       w8(bus, mmio(0x16), (0x100 + y) & 0xff);
       w8(bus, mmio(0x17), ((0x100 + y) >>> 8) & 0xff);
       w8(bus, mmio(0x18), 0xaa);

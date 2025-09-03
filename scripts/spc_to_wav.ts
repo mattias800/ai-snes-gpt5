@@ -15,6 +15,7 @@ interface CliArgs {
   channels: 1 | 2;
   allowSilence: boolean;
   gain: number;
+  autoGain: boolean;
   prerollMs: number;
   mask: number | null;
   forcePan: number | null;
@@ -38,6 +39,7 @@ interface CliArgs {
   logDspParams: boolean;
   freezeSmp: boolean;
   forceKon: boolean;
+  debugPcm: number;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -53,6 +55,7 @@ function parseArgs(argv: string[]): CliArgs {
   const channels = Number(args['channels'] || '2');
   const allowSilence = (args['allow-silence'] === '1' || args['allowSilence'] === '1');
   const gain = Number(args['gain'] || '1');
+  const autoGain = (args['auto-gain'] ?? '0') === '1';
   const prerollMs = Number(args['preroll-ms'] || args['preroll'] || '200');
   const mask = args['mask'] != null ? Number(args['mask']) : null;
   const forcePan = args['force-pan'] != null ? Number(args['force-pan']) : null;
@@ -77,6 +80,7 @@ function parseArgs(argv: string[]): CliArgs {
   const logDspParams = (args['log-dsp-params'] ?? '0') === '1';
   const freezeSmp = (args['freeze-smp'] ?? '0') === '1';
   const forceKon = ((args['force-kon'] ?? '0') === '1' || (args['force-kon'] ?? '').toLowerCase() === 'auto');
+  const debugPcm = Number(args['debug-pcm'] ?? '0');
   if (!Number.isFinite(seconds) || seconds <= 0) throw new Error('Invalid --seconds');
   if (!Number.isFinite(rate) || rate <= 0) throw new Error('Invalid --rate');
   if (channels !== 1 && channels !== 2) throw new Error('Invalid --channels (1 or 2)');
@@ -88,7 +92,8 @@ function parseArgs(argv: string[]): CliArgs {
   if (!Number.isFinite(traceMs) || traceMs < 0) throw new Error('Invalid --trace-ms');
   if (!Number.isFinite(traceTimersMs) || traceTimersMs < 0) throw new Error('Invalid --trace-timers-ms');
   if (!Number.isFinite(traceDspIo) || traceDspIo < 0) throw new Error('Invalid --trace-dspio');
-  return { in: inPath, out: outPath, seconds, rate, channels: channels as 1 | 2, allowSilence, gain, prerollMs, mask, forcePan, forcePanMs, nullIrqIplHle, apuIplHle, rewriteNullIrq, traceMs, traceSmp, traceMix, traceIo, timerIrq, dumpInit, traceDecode, traceKon, traceTimersMs, traceDspIo, smpNoLowPower, mapIplRom, logDspKeys, logDspParams, freezeSmp, forceKon };
+  if (!Number.isFinite(debugPcm) || debugPcm < 0) throw new Error('Invalid --debug-pcm');
+  return { in: inPath, out: outPath, seconds, rate, channels: channels as 1 | 2, allowSilence, gain, autoGain, prerollMs, mask, forcePan, forcePanMs, nullIrqIplHle, apuIplHle, rewriteNullIrq, traceMs, traceSmp, traceMix, traceIo, timerIrq, dumpInit, traceDecode, traceKon, traceTimersMs, traceDspIo, smpNoLowPower, mapIplRom, logDspKeys, logDspParams, freezeSmp, forceKon, debugPcm };
 }
 
 function writeWavPCM16LE(samples: Int16Array, sampleRate: number, channels: number): Buffer {
@@ -113,9 +118,14 @@ function writeWavPCM16LE(samples: Int16Array, sampleRate: number, channels: numb
   // data chunk
   buf.write('data', o); o += 4;
   buf.writeUInt32LE(dataSize, o); o += 4;
-  // samples
-  for (let i = 0; i < numSamples; i++) {
-    buf.writeInt16LE(samples[i], o); o += 2;
+  // Fast-path copy: use the underlying bytes of the Int16Array (little-endian on this platform)
+  const pcmBytes = Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength);
+  pcmBytes.copy(buf, o);
+  // Sanity fallback (shouldn't happen): if copy didn't fill expected size, write manually
+  // This guards against any exotic platform endianness issues.
+  if (buf.length !== 44 + dataSize) {
+    let p = o;
+    for (let i = 0; i < numSamples; i++) { buf.writeInt16LE(samples[i], p); p += 2; }
   }
   return buf;
 }
@@ -309,9 +319,13 @@ async function main() {
   let lastKon = 0, lastKof = 0;
   try { const regs: Uint8Array | undefined = dsp?.['regs']; if (regs) { lastKon = regs[0x4c]&0xff; lastKof = regs[0x5c]&0xff; } } catch {}
 
+  let prerollPeakAbs = 0;
   for (let i = 0; i < prerollFrames; i++) {
     if (!args.freezeSmp) apu.step(cyclesPerSample);
-    apu.mixSample(); // advance DSP state
+    const [pl, pr] = apu.mixSample(); // advance DSP state
+    // Track peak during preroll at current gain
+    const pa = Math.max(Math.abs(pl | 0), Math.abs(pr | 0));
+    if (pa > prerollPeakAbs) prerollPeakAbs = pa;
     if (args.traceKon && dsp) {
       try {
         const regs: Uint8Array | undefined = dsp['regs'];
@@ -331,12 +345,32 @@ async function main() {
     }
   }
 
+  // Optional auto-gain after preroll: if peak is too low, boost so that
+  // expected program material hits a comfortable headroom (target ~ 12000).
+  if (args.autoGain) {
+    // Only auto-boost if user didn't already set a large gain
+    const currentGain = (args.gain || 1);
+    if (prerollPeakAbs <= 64 && currentGain <= 4) {
+      const target = 12000; // about -6dBFS headroom for single-voice typical peaks
+      const boost = Math.max(1, Math.min(8192, Math.round(target / Math.max(1, prerollPeakAbs))));
+      try {
+        (apu as any).setMixGain?.(currentGain * boost);
+        // eslint-disable-next-line no-console
+        console.log(`[AUTO-GAIN] prerollPeak=${prerollPeakAbs} -> boost=${boost} (gain=${currentGain} -> ${currentGain * boost})`);
+      } catch {}
+    }
+  }
+
   let maxAbs = 0;
   let sumSq = 0;
 
   for (let i = 0; i < totalFrames; i++) {
     if (!args.freezeSmp) apu.step(cyclesPerSample);
     const [l, r] = apu.mixSample();
+    if (args.debugPcm > 0 && i < args.debugPcm) {
+      // eslint-disable-next-line no-console
+      console.log(`[PCMDBG][cap] i=${i} l=${l} r=${r}`);
+    }
     if (args.traceKon && dsp) {
       try {
         const regs: Uint8Array | undefined = dsp['regs'];
@@ -478,6 +512,13 @@ async function main() {
       }
       try { (apu as any).endMixTrace?.(); } catch {}
     } catch {}
+  }
+
+  if (args.debugPcm > 0) {
+    const head = [] as number[];
+    for (let i = 0; i < Math.min(pcm.length, args.debugPcm * args.channels); i++) head.push(pcm[i] | 0);
+    // eslint-disable-next-line no-console
+    console.log(`[PCMDBG][head] ${JSON.stringify(head)}`);
   }
 
   const wav = writeWavPCM16LE(pcm, args.rate, args.channels);

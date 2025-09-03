@@ -52,8 +52,8 @@ describe('SMP MOV X <-> memory (dp, dp+Y, abs)', () => {
     apu.aram[0x1234] = 0x55;
 
     // X <- $1234; then store to $1235
-    apu.aram[pc + 0] = 0xF9; apu.aram[pc + 1] = 0x34; apu.aram[pc + 2] = 0x12; // MOV X,$1234
-    apu.aram[pc + 3] = 0xD9; apu.aram[pc + 4] = 0x35; apu.aram[pc + 5] = 0x12; // MOV $1235,X
+    apu.aram[pc + 0] = 0xF9; apu.aram[pc + 1] = 0x34; apu.aram[pc + 2] = 0x12; // LDX $1234
+    apu.aram[pc + 3] = 0xD9; apu.aram[pc + 4] = 0x35; apu.aram[pc + 5] = 0x12; // STX $1235
 
     apu.smp.PC = pc;
     apu.step(48);

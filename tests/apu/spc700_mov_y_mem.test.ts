@@ -11,8 +11,8 @@ describe('SMP MOV Y <-> memory (dp, dp+X, abs)', () => {
     apu.smp.PSW = 0x85; // P=0
     apu.aram[0x0040] = 0x01; // source dp
 
-    apu.aram[pc + 0] = 0xF6; apu.aram[pc + 1] = 0x40; // MOV Y,$40
-    apu.aram[pc + 2] = 0xD6; apu.aram[pc + 3] = 0x41; // MOV $41,Y
+    apu.aram[pc + 0] = 0xF6; apu.aram[pc + 1] = 0x40; // LDY $40
+    apu.aram[pc + 2] = 0xD6; apu.aram[pc + 3] = 0x41; // STY $41
 
     apu.smp.PC = pc;
     apu.step(32);
@@ -32,8 +32,8 @@ describe('SMP MOV Y <-> memory (dp, dp+X, abs)', () => {
     apu.smp.X = 0x02;
     apu.aram[0x0052] = 0x80; // effective for $50+X
 
-    apu.aram[pc + 0] = 0xFA; apu.aram[pc + 1] = 0x50; // MOV Y,$50+X -> $52
-    apu.aram[pc + 2] = 0xD7; apu.aram[pc + 3] = 0x51; // MOV $51+X,Y -> $53 (canonical)
+    apu.aram[pc + 0] = 0xFA; apu.aram[pc + 1] = 0x50; // LDY $50+X -> $52
+    apu.aram[pc + 2] = 0xD7; apu.aram[pc + 3] = 0x51; // STY $51+X -> $53
 
     apu.smp.PC = pc;
     apu.step(40);

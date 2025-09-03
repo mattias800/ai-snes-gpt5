@@ -13,10 +13,10 @@ function mkBus() {
 }
 
 describe('PPU VRAM increment modes', () => {
-  it('inc-after-high (bit7=0), step +32 words', () => {
+  it('inc-after-high (bit7=1), step +32 words', () => {
     const bus = mkBus();
-    // Set VMAIN: bit7=0 (inc after high), step=1 -> +32 words
-    w8(bus, mmio(0x15), 0x01);
+    // Set VMAIN: bit7=1 (inc after HIGH), step=1 -> +32 words
+    w8(bus, mmio(0x15), 0x81);
     // Set VADDR to 0x0000
     w8(bus, mmio(0x16), 0x00);
     w8(bus, mmio(0x17), 0x00);
@@ -32,10 +32,10 @@ describe('PPU VRAM increment modes', () => {
     expect(ppu.inspectVRAMWord(0x0020)).toBe(0x4433);
   });
 
-  it('inc-after-low (bit7=1), step +128 words', () => {
+  it('inc-after-low (bit7=0), step +128 words', () => {
     const bus = mkBus();
-    // Set VMAIN: bit7=1 (inc after low), step=2 -> +128 words
-    w8(bus, mmio(0x15), 0x82);
+    // Set VMAIN: bit7=0 (inc after LOW), step=2 -> +128 words
+    w8(bus, mmio(0x15), 0x02);
     // Set VADDR to 0x0100
     w8(bus, mmio(0x16), 0x00);
     w8(bus, mmio(0x17), 0x01);
@@ -66,8 +66,8 @@ describe('PPU VRAM increment modes', () => {
     w8(bus, mmio(0x18), 0xbb);
     w8(bus, mmio(0x19), 0xbb);
 
-    // Set VADDR to 0x0000 and VMAIN bit7=0 (inc after high)
-    w8(bus, mmio(0x15), 0x00);
+  // Set VADDR to 0x0000 and VMAIN bit7=1 (inc after HIGH)
+  w8(bus, mmio(0x15), 0x80);
     w8(bus, mmio(0x16), 0x00);
     w8(bus, mmio(0x17), 0x00);
     // Read low, high -> increment after high
@@ -76,8 +76,8 @@ describe('PPU VRAM increment modes', () => {
     // Now reading next low should be from 0x0001
     expect(r8(bus, mmio(0x39))).toBe(0xbb);
 
-    // Set VMAIN bit7=1 (inc after low), reset VADDR
-    w8(bus, mmio(0x15), 0x80);
+  // Set VMAIN bit7=0 (inc after LOW), reset VADDR
+  w8(bus, mmio(0x15), 0x00);
     w8(bus, mmio(0x16), 0x00);
     w8(bus, mmio(0x17), 0x00);
     expect(r8(bus, mmio(0x39))).toBe(0xaa); // low -> increment now

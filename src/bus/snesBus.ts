@@ -212,7 +212,7 @@ export class SNESBus implements IMemoryBus {
 
     // Optional MMIO read logging
     const isPPU = (off & 0xff00) === 0x2100;
-    const isCPU = (off >= 0x4200 && off <= 0x421f) || off === 0x4016;
+    const isCPU = (off >= 0x4200 && off <= 0x421f) || (off >= 0x4300 && off <= 0x437f) || off === 0x4016;
     const passFilter = !this.logFilter || this.logFilter.size === 0 || this.logFilter.has(off);
     const shouldLog = this.logMMIO && passFilter && (isPPU || isCPU) && this.logCount < this.logLimit;
 
@@ -617,12 +617,19 @@ export class SNESBus implements IMemoryBus {
       let count = initialCount;
 
       while (count > 0) {
-        // Determine B address per mode (support mode 0 and 1 only)
+        // Determine B address per mode
         let bOff = baseB;
         if (mode === 1) {
           // Alternate between base and base+1 per transfer
           const toggled = ((initialCount - count) & 1) !== 0;
           bOff = baseB + (toggled ? 1 : 0);
+        } else {
+          // Fallback for common VRAM DMA patterns: if BBAD==$18 (VMDATA),
+          // treat unknown modes like mode 1 (alternate $2118/$2119) so words commit.
+          if ((baseB & 0xfe) === 0x18) {
+            const toggled = ((initialCount - count) & 1) !== 0;
+            bOff = 0x18 + (toggled ? 1 : 0); // alternate strictly between $2118 and $2119
+          }
         }
         const bAddr = 0x002100 | (bOff & 0xff);
 
@@ -658,7 +665,7 @@ export class SNESBus implements IMemoryBus {
 
     // Optional MMIO logging for $2100-$21FF and $4200-$421F and $4016
     const isPPU = (off & 0xff00) === 0x2100;
-    const isCPU = (off >= 0x4200 && off <= 0x421f) || off === 0x4016;
+    const isCPU = (off >= 0x4200 && off <= 0x421f) || (off >= 0x4300 && off <= 0x437f) || off === 0x4016;
     const passFilter = !this.logFilter || this.logFilter.size === 0 || this.logFilter.has(off);
     if (this.logMMIO && passFilter && (isPPU || isCPU) && this.logCount < this.logLimit) {
       // eslint-disable-next-line no-console

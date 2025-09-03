@@ -17,12 +17,12 @@ describe('BG1 RGBA render with CGRAM colors', () => {
     const bus = mkBus();
     const ppu = bus.getPPU();
 
-    // Set BG1 map base at 0x0000, char base at 0x1000
+    // Set BG1 map base at 0x0000, char base at 0x1000 (BG1 uses LOW nibble)
     w8(bus, mmio(0x07), 0x00);
-    w8(bus, mmio(0x0b), 0x20);
+    w8(bus, mmio(0x0b), 0x01);
 
     // Build a tile with plane0 bit pattern 0xF0 (11110000) for row 0..7 -> left half 1s, right half 0s
-    w8(bus, mmio(0x15), 0x00);
+    w8(bus, mmio(0x15), 0x80);
     for (let y = 0; y < 8; y++) {
       w8(bus, mmio(0x16), (0x1000 + y) & 0xff);
       w8(bus, mmio(0x17), ((0x1000 + y) >>> 8) & 0xff);

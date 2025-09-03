@@ -39,6 +39,16 @@ async function main() {
     const s = dumpWords(emu, r, 12);
     console.log(`VRAM[${r.toString(16)}]: ${s}`);
   }
+
+  // Optional args: start word address and count to dump arbitrary region
+  const startArg = process.argv[4];
+  const countArg = process.argv[5];
+  if (startArg && countArg) {
+    const start = parseInt(startArg, 16);
+    const count = parseInt(countArg, 16);
+    const s = dumpWords(emu, start, count);
+    console.log(`VRAM[${start.toString(16)}..+${count.toString(16)}]: ${s}`);
+  }
 }
 
 main().catch(e => { console.error(e); process.exit(1); });

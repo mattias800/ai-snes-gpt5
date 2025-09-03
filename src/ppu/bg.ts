@@ -51,7 +51,7 @@ export function renderBG2RegionIndices(ppu: PPU, widthPixels: number, heightPixe
   const tileSize = (ppu as any).bg2TileSize16 ? 16 : 8;
   const mapWidth = ppu.bg2MapWidth64 ? 64 : 32;
   const mapHeight = ppu.bg2MapHeight64 ? 64 : 32;
-  const is2bpp = (ppu.bgMode === 0); // Mode 0: BG2 is 2bpp; otherwise default to 4bpp
+  const is2bpp = (ppu.bgMode === 0); // Mode 0: BG2 is 2bpp; else default to 4bpp
 
   for (let y = 0; y < heightPixels; y++) {
     for (let x = 0; x < widthPixels; x++) {
@@ -340,13 +340,14 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
   const subOBJ = (ppu.ts & 0x10) !== 0;
   const backColor = ppu.inspectCGRAMWord(0);
 
-  // Simplified: global enable controlled by bit5 (legacy for our tests)
-  // Strict mask mode (flag on PPU) removes dependence on bit5 and uses only per-layer mask bits
+  // Strict vs simplified color-math gating:
+  // - strictMask=true: ignore bit5; mask==0 means "apply to all layers" (legacy tests depend on this)
+  // - strictMask=false: require bit5 as a global enable; mask==0 means "apply to none"
   const strictMask = (ppu as any).cgwStrictMaskMode === true;
   const globalEnable = strictMask ? true : ((ppu.cgadsub & 0x20) !== 0);
   const subtract = (ppu.cgadsub & 0x80) !== 0;
   const half = (ppu.cgadsub & 0x40) !== 0;
-  const mask = ppu.cgadsub & 0x1f; // per-layer select (BG1..BG4/OBJ) + bit5 used as global in tests
+  const mask = ppu.cgadsub & 0x1f; // per-layer select (BG1..BG4/OBJ) in our simplified model
 
   // Windowing: two inclusive ranges A[wh0..wh1] and B[wh2..wh3].
   // W12SEL/W34SEL/WOBJSEL enable gating per layer but we only support A/B with OR/AND/XOR/XNOR via CGWSEL bits 6-7.
@@ -425,6 +426,24 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
     return { pal: best.pal, zero: false, pri: best.pri };
   }
 
+  // Optional debug for BG4/BG2 window math issues
+  try {
+    // @ts-ignore
+    const dbg4 = (globalThis as any).process?.env?.DEBUG_BG4;
+    if (dbg4 && widthPixels === 8 && heightPixels === 1 && (ppu.tm & 0x08)) {
+      const ii = 1;
+      // eslint-disable-next-line no-console
+      console.log(`[DBG_BG4] pre i=${ii} bg4=${bg4[ii]} bg3=${bg3[ii]} bg2=${bg2[ii]} bg1=${bg1[ii]} tm=0x${ppu.tm.toString(16)} ts=0x${ppu.ts.toString(16)} cgwsel=0x${ppu.cgwsel.toString(16)} cgadsub=0x${ppu.cgadsub.toString(16)} w34sel=0x${ppu.w34sel.toString(16)} wh=[${ppu.wh0},${ppu.wh1}]`);
+    }
+    // @ts-ignore
+    const dbg2 = (globalThis as any).process?.env?.DEBUG_BG2;
+    if (dbg2 && widthPixels === 8 && heightPixels === 1 && (ppu.tm & 0x02)) {
+      const ii = 1;
+      // eslint-disable-next-line no-console
+      console.log(`[DBG_BG2] pre i=${ii} bg2=${bg2[ii]} bg1=${bg1[ii]} tm=0x${ppu.tm.toString(16)} ts=0x${ppu.ts.toString(16)} cgwsel=0x${ppu.cgwsel.toString(16)} cgadsub=0x${ppu.cgadsub.toString(16)} w12sel=0x${ppu.w12sel.toString(16)} wh=[${ppu.wh0},${ppu.wh1}]`);
+    }
+  } catch {}
+
   for (let i = 0; i < bg1.length; i++) {
     const pal1 = bg1[i] & 0xff; const z1 = (pal1 & 0x0f) === 0; const prio1 = pr1[i] | 0;
     const pal2 = bg2[i] & 0xff; const z2 = (pal2 & 0x0f) === 0; const prio2 = pr2[i] | 0;
@@ -444,6 +463,22 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
     considerMain(2, enableBG2, z2, prio2, pal2);
     considerMain(3, enableBG3, z3, prio3, pal3);
     considerMain(4, enableBG4, (bg4[i] & 0x0f) === 0, pr4[i] | 0, bg4[i] & 0xff);
+
+    // Optional debug
+    try {
+      // @ts-ignore
+      const dbg4 = (globalThis as any).process?.env?.DEBUG_BG4;
+      if (dbg4 && widthPixels === 8 && heightPixels === 1 && i === 1) {
+        // eslint-disable-next-line no-console
+        console.log(`[DBG_BG4] choose i=1 mainLayer=${mainLayer} mainColor=0x${mainColor.toString(16)} pr=[${prio1},${prio2},${prio3},${pr4[i] | 0}] bgPal=[${bg1[i]},${bg2[i]},${bg3[i]},${bg4[i]}]`);
+      }
+      // @ts-ignore
+      const dbg2 = (globalThis as any).process?.env?.DEBUG_BG2;
+      if (dbg2 && widthPixels === 8 && heightPixels === 1 && (i === 1 || i === 5)) {
+        // eslint-disable-next-line no-console
+        console.log(`[DBG_BG2] choose i=${i} mainLayer=${mainLayer} mainColor=0x${mainColor.toString(16)} pr=[${prio1},${prio2}] bgPal=[${bg1[i]},${bg2[i]}]`);
+      }
+    } catch {}
     considerMain(5, enableOBJ, obj.zero, obj.pri, obj.pal);
 
   // Choose subscreen pixel by priority among enabled TS layers
@@ -465,8 +500,16 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
   }
 
     let outColor = mainColor;
-    // Apply color math only if globally enabled and the main layer is selected in mask (or mask==0 applies to all)
-    let mainAffected = (mask === 0) || (mainLayer === 1 && (mask & 0x01)) || (mainLayer === 2 && (mask & 0x02)) || (mainLayer === 3 && (mask & 0x04)) || (mainLayer === 4 && (mask & 0x08)) || (mainLayer === 5 && (mask & 0x10));
+    // Apply color math only if globally enabled and the main layer is selected by mask
+    // Note: mask==0 semantics depend on strictMask flag.
+    function layerSelected(lid: number): boolean {
+      return (lid === 1 && (mask & 0x01) !== 0) ||
+             (lid === 2 && (mask & 0x02) !== 0) ||
+             (lid === 3 && (mask & 0x04) !== 0) ||
+             (lid === 4 && (mask & 0x08) !== 0) ||
+             (lid === 5 && (mask & 0x10) !== 0);
+    }
+    let mainAffected = (strictMask && mask === 0) || layerSelected(mainLayer);
 
     // Window gate: per-layer A/B enables via W12SEL/W34SEL/WOBJSEL.
     // Mapping (simplified):
@@ -496,6 +539,14 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
       //  - whether color math can apply (applyInside controls which side)
       //  - optionally, whether to clip the main color to black on the non-math side
       const mathSide = applyInside ? inWindow : !inWindow;
+      try {
+        // @ts-ignore
+        const dbg2 = (globalThis as any).process?.env?.DEBUG_BG2;
+        if (dbg2 && widthPixels === 8 && heightPixels === 1 && (i === 1 || i === 5) && mainLayer === 2) {
+          // eslint-disable-next-line no-console
+          console.log(`[DBG_BG2] gate i=${i} inA=${aHit} inB=${bHit} inWindow=${inWindow} applyInside=${applyInside} mathSide=${mathSide}`);
+        }
+      } catch {}
       if (!mathSide) mainAffected = false;
       if (clipToBlack && !mathSide) clipThisPixel = true;
     }
@@ -527,6 +578,14 @@ export function renderMainScreenRGBA(ppu: PPU, widthPixels: number, heightPixels
 
     // If clip-to-black applies, override output immediately (no math)
     if (clipThisPixel) {
+      try {
+        // @ts-ignore
+        const dbg = (globalThis as any).process?.env?.DEBUG_BG4;
+        if (dbg && widthPixels === 8 && heightPixels === 1 && i === 1) {
+          // eslint-disable-next-line no-console
+          console.log(`[DBG_BG4] clip i=1`);
+        }
+      } catch {}
       outColor = 0;
     } else if (globalEnable && mainAffected) {
       const mr = (mainColor >> 10) & 0x1f; const mg = (mainColor >> 5) & 0x1f; const mb = mainColor & 0x1f;
@@ -559,7 +618,7 @@ export function renderBG1RegionIndices(ppu: PPU, widthPixels: number, heightPixe
   const tileSize = ppu.bg1TileSize16 ? 16 : 8;
   const mapWidth = ppu.bg1MapWidth64 ? 64 : 32;
   const mapHeight = ppu.bg1MapHeight64 ? 64 : 32;
-  const is2bpp = (ppu.bgMode === 0); // Mode 0: BG1 is 2bpp; otherwise default to 4bpp
+  const is2bpp = (ppu.bgMode === 0); // Mode 0: BG1 is 2bpp; else default to 4bpp
 
   for (let y = 0; y < heightPixels; y++) {
     for (let x = 0; x < widthPixels; x++) {

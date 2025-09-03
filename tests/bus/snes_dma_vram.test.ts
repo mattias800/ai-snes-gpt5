@@ -16,8 +16,8 @@ describe('DMA to VRAM and CGRAM via PPU ports', () => {
   it('A->B mode 1 DMA writes sequential VRAM words via $2118/$2119 with inc-after-high', () => {
     const bus = mkBus();
     const ppu = bus.getPPU();
-    // Set VMAIN inc after high, step +1 word
-    w8(bus, mmio(0x15), 0x00);
+    // Set VMAIN inc after HIGH (bit7=1), step +1 word
+    w8(bus, mmio(0x15), 0x80);
     // Set VADDR word base
     const base = 0x0200;
     w8(bus, mmio(0x16), base & 0xff);

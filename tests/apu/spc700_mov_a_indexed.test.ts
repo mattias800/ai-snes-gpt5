@@ -13,7 +13,7 @@ describe('SMP MOV A indexed and dp+X store', () => {
     apu.aram[0x0062] = 0x80; // $60+X -> $62
 
     apu.aram[pc + 0] = 0xF4; apu.aram[pc + 1] = 0x60; // MOV A,$60+X
-    apu.aram[pc + 2] = 0xD5; apu.aram[pc + 3] = 0x61; // MOV $61+X,A -> $63
+    apu.aram[pc + 2] = 0xD5; apu.aram[pc + 3] = 0x61; // STA $61+X -> $63
 
     apu.smp.PC = pc;
     apu.step(40);

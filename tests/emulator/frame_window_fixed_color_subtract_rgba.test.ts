@@ -23,11 +23,11 @@ describe('Frame RGBA: window + fixed-color subtract-half over BG1 (inside vs out
 
     // BG1 bases and VMAIN
     w8(bus, mmio(0x07), 0x00); // map base 0x0000
-    w8(bus, mmio(0x0b), 0x10); // char base 0x0800 words
-    w8(bus, mmio(0x15), 0x00);
+    w8(bus, mmio(0x0b), 0x01); // BG1 char base nibble=1 -> 0x1000 words
+    w8(bus, mmio(0x15), 0x80);
 
     // Write red 4bpp tile 0 at 0x0800 (palette index 1 solid)
-    const tileBaseWord = 0x0800;
+    const tileBaseWord = 0x1000;
     for (let y = 0; y < 8; y++) {
       w8(bus, mmio(0x16), (tileBaseWord + y) & 0xff);
       w8(bus, mmio(0x17), ((tileBaseWord + y) >>> 8) & 0xff);

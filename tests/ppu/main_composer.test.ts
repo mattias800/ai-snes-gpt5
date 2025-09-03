@@ -25,7 +25,7 @@ describe('Main screen composer: BG1 over BG2 (simplified)', () => {
 
     // BG1: map base 0x0000, char base 0x1000; tile 0 has pix=0 -> transparent
     w8(bus, mmio(0x07), 0x00);
-    w8(bus, mmio(0x0b), 0x20);
+    w8(bus, mmio(0x0b), 0x01);
     // Write tile 0: all planes zero => pix=0
     for (let y = 0; y < 16; y++) {
       w8(bus, mmio(0x16), (0x1000 + y) & 0xff);

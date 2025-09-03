@@ -33,16 +33,16 @@ describe('BG4 window gating (2bpp like BG3) with color math', () => {
     w8(bus, mmio(0x2c), 0x08);
     w8(bus, mmio(0x2d), 0x02);
 
-    // BG4 map base 0 ($210A), BG34NBA ($210C) low nibble for BG4 char base
+    // BG4 map base 0 ($210A), BG34NBA ($210C): BG4 uses HIGH nibble
     w8(bus, mmio(0x0a), 0x00); // map base 0
-    w8(bus, mmio(0x0c), 0x01); // BG4 char base nibble=1 -> 0x0800 words; BG3 nibble=0
+    w8(bus, mmio(0x0c), 0x10); // BG4 char base nibble=1 -> 0x1000 words; BG3 nibble=0
 
     // BG2 map/char for subscreen green; place BG2 tilemap at word 0x0200 to avoid overlap with BG4 tilemap
     w8(bus, mmio(0x08), 0x04); // map base offset -> word 0x0200
-    w8(bus, mmio(0x0b), 0x22);
+    w8(bus, mmio(0x0b), 0x11);
 
     // Make BG4 tile 0 solid index 1
-    writeBG4SolidTile0(bus, 0x0800);
+    writeBG4SolidTile0(bus, 0x1000);
 
     // BG4 tilemap entry 0 -> tile 0, pal group 0
     w8(bus, mmio(0x16), 0x00); w8(bus, mmio(0x17), 0x00); w8(bus, mmio(0x18), 0x00); w8(bus, mmio(0x19), 0x00);

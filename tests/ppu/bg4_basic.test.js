@@ -26,11 +26,11 @@ describe('BG4 2bpp basic render', () => {
         w8(bus, mmio(0x00), 0x0f);
         // Enable BG4 only
         w8(bus, mmio(0x2c), 0x08);
-        // BG4 map base 0, BG4 char base nibble=1 -> 0x0800 words
+        // BG4 map base 0, BG4 char base nibble=1 -> 0x1000 words (BG4 uses HIGH nibble)
         w8(bus, mmio(0x0a), 0x00);
-        w8(bus, mmio(0x0c), 0x01);
-        // Create 2bpp solid tile index 0 at 0x0800 words
-        writeBG4SolidTile0(bus, 0x0800);
+        w8(bus, mmio(0x0c), 0x10);
+        // Create 2bpp solid tile index 0 at 0x1000 words
+        writeBG4SolidTile0(bus, 0x1000);
         // Tilemap entry 0 -> tile 0, palette group 0
         w8(bus, mmio(0x16), 0x00);
         w8(bus, mmio(0x17), 0x00);

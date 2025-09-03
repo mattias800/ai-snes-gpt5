@@ -19,7 +19,7 @@ describe('BG2 16x16 tile size mapping (BGMODE bit5)', () => {
 
     // BG2 map base 0x0000, char base 0x1000, enable 16x16 tiles via BGMODE bit5
     w8(bus, mmio(0x08), 0x00);
-    w8(bus, mmio(0x0b), 0x02); // BG2 char base nibble=2 -> 0x1000 words
+    w8(bus, mmio(0x0b), 0x10); // BG2 char base nibble=1 (HIGH nibble) -> 0x1000 words
     w8(bus, mmio(0x05), 0x20); // mode 0, bit5=1 -> BG2 16x16
 
     // Create 4 distinct 8x8 tiles at char base 0x1000 words:

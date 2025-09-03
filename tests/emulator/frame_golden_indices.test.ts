@@ -15,8 +15,8 @@ function staAbs(prog: number[], addr: number) {
 
 function buildProgram(): Uint8Array {
   const p: number[] = [];
-  // Set VMAIN = 0x00 (inc after high, step +1 word)
-  ldaImm(p, 0x00); staAbs(p, 0x2115);
+  // Set VMAIN = 0x80 (inc after high, step +1 word)
+  ldaImm(p, 0x80); staAbs(p, 0x2115);
 
   // Write tile planes at tileBase=0x0100 words
   const tileBaseWord = 0x0100;

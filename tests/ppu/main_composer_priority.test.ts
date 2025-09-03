@@ -21,9 +21,9 @@ describe('Main composer with per-tile priority (BG2 high over BG1 low)', () => {
     w8(bus, mmio(0x00), 0x0f);
     w8(bus, mmio(0x2c), 0x03);
 
-    // BG1: map base 0, char base 0x1000, tile 1 solid, low priority (bit13=0)
+    // BG1: map base 0, char base 0x1000; tile 1 solid, low priority (bit13=0)
     w8(bus, mmio(0x07), 0x00);
-    w8(bus, mmio(0x0b), 0x20);
+    w8(bus, mmio(0x0b), 0x01);
     // tile data at 0x1000 + 16 words
     for (let y = 0; y < 8; y++) {
       w8(bus, mmio(0x16), (0x1000 + 16 + y) & 0xff);

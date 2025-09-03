@@ -21,11 +21,11 @@ function buildProgram(): Uint8Array {
   ldaImm(p, 0x00); staAbs(p, 0x2107);
   // BG12NBA ($210B) = 0x01 (BG1 char base nibble=1 -> char base 0x0800 words)
   ldaImm(p, 0x01); staAbs(p, 0x210b);
-  // VMAIN ($2115) = 0x00 (inc after high, +1 word)
-  ldaImm(p, 0x00); staAbs(p, 0x2115);
+  // VMAIN ($2115) = 0x80 (inc after HIGH, +1 word)
+  ldaImm(p, 0x80); staAbs(p, 0x2115);
 
   // Write 4bpp tile 1 at char base: solid palette index 1 (tile index 1 to keep tile 0 blank)
-  const tileBaseWord = 0x0800;
+  const tileBaseWord = 0x1000;
   const tile1WordBase = tileBaseWord + 16; // 16 words per 4bpp tile
   for (let y = 0; y < 8; y++) {
     // VMADD = tile1WordBase + y (word)

@@ -36,7 +36,7 @@ describe('SPC700 cycles (table-driven)', () => {
       verify: (apu) => { expect(apu.smp.A & 0xff).toBe(0x12); }
     },
     {
-      name: 'MOV dp,A (C5) = 3',
+      name: 'STA dp (C5) = 3',
       expectedCycles: 3,
       program: [0xC5, 0x35],
       setup: (apu) => { apu.smp.PSW = 0x00; apu.smp.A = 0x77; },
@@ -50,7 +50,7 @@ describe('SPC700 cycles (table-driven)', () => {
       verify: (apu) => { expect(apu.smp.A & 0xff).toBe(0x9C); }
     },
     {
-      name: 'MOV abs,A (C4) = 5',
+      name: 'STA abs (C4) = 5',
       expectedCycles: 5,
       program: [0xC4, 0x57, 0x34],
       setup: (apu) => { apu.smp.A = 0x9D; },
@@ -64,7 +64,7 @@ describe('SPC700 cycles (table-driven)', () => {
       verify: (apu) => { expect(apu.smp.A & 0xff).toBe(0x77); }
     },
     {
-      name: 'MOV dp+X,A (D5) = 4',
+      name: 'STA dp+X (D5) = 4',
       expectedCycles: 4,
       program: [0xD5, 0x41],
       setup: (apu) => { apu.smp.PSW = 0x00; apu.smp.X = 0x02; apu.smp.A = 0x88; },

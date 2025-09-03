@@ -32,7 +32,7 @@ describe('Color math masks (per-layer selection)', () => {
         w8(bus, mmio(0x07), 0x00);
         w8(bus, mmio(0x08), 0x04);
         // BG1/BG2 char bases = 0x1000 words
-        w8(bus, mmio(0x0b), 0x22);
+        w8(bus, mmio(0x0b), 0x11);
         // Tile data
         writeSolidTile1(bus);
         // BG1 tilemap entry 0 -> tile 1, palette group 0
