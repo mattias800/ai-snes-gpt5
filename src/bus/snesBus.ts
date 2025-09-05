@@ -584,7 +584,7 @@ export class SNESBus implements IMemoryBus {
 
     // ROM mapping (simplified LoROM/HiROM)
     if (this.cart.mapping === 'lorom') {
-      // LoROM: banks 0x00-0x7D, 0x80-0xFF: 0x8000-0xFFFF map to ROM in 32KiB chunks
+      // Standard LoROM: banks 0x00-0x7D, 0x80-0xFF: 0x8000-0xFFFF map to ROM in 32KiB chunks
       if (off >= 0x8000) {
         const loBank = bank & 0x7f;
         const romAddr = (loBank * 0x8000) + (off - 0x8000);
@@ -609,12 +609,21 @@ export class SNESBus implements IMemoryBus {
       const fixedA = (dmap & 0x08) !== 0; // fixed A address (no increment)
       const decA = (dmap & 0x10) !== 0;   // decrement A address
       const dirBtoA = (dmap & 0x80) !== 0; // 1 = B->A, 0 = A->B
+      
+      // Debug DMA configuration
+      if (ch === 0) {
+        console.log(`DMA ch0 config: DMAP=0x${dmap.toString(16).padStart(2,'0')} mode=${mode} fixedA=${fixedA} decA=${decA} dir=${dirBtoA ? 'B->A' : 'A->B'}`);
+        console.log(`  Source: bank=$${this.a1b[ch].toString(16).padStart(2,'0')} addr=$${this.a1tl[ch].toString(16).padStart(4,'0')}`);
+        console.log(`  Dest: BBAD=$${this.bbad[ch].toString(16).padStart(2,'0')} (PPU $21${this.bbad[ch].toString(16).padStart(2,'0')})`);
+        console.log(`  Count: $${(this.das[ch] || 0x10000).toString(16)} bytes`);
+      }
 
       const baseB = this.bbad[ch]; // $21xx base
       let aAddr = this.a1tl[ch];
       const aBank = this.a1b[ch];
       const initialCount = this.das[ch] || 0x10000; // 0 means 65536 bytes in hardware
       let count = initialCount;
+      let debugCounter = 0;
 
       while (count > 0) {
         // Determine B address per mode
@@ -628,7 +637,7 @@ export class SNESBus implements IMemoryBus {
           // treat unknown modes like mode 1 (alternate $2118/$2119) so words commit.
           if ((baseB & 0xfe) === 0x18) {
             const toggled = ((initialCount - count) & 1) !== 0;
-            bOff = 0x18 + (toggled ? 1 : 0); // alternate strictly between $2118 and $2119
+            bOff = baseB + (toggled ? 1 : 0); // alternate between baseB and baseB+1
           }
         }
         const bAddr = 0x002100 | (bOff & 0xff);
@@ -642,6 +651,11 @@ export class SNESBus implements IMemoryBus {
           // A->B
           const la = ((aBank << 16) | aAddr) >>> 0;
           const val = this.read8(la);
+          // Debug first few bytes of DMA to VRAM
+          if ((bOff & 0xfe) === 0x18 && debugCounter < 16) {
+            console.log(`DMA ch${ch}: src=$${la.toString(16).padStart(6,'0')} val=$${val.toString(16).padStart(2,'0')} -> $21${bOff.toString(16).padStart(2,'0')}`);
+            debugCounter++;
+          }
           this.mapWrite(bAddr, val);
         }
 
@@ -654,7 +668,10 @@ export class SNESBus implements IMemoryBus {
       }
 
       // Update channel registers post-transfer
-      this.a1tl[ch] = aAddr;
+      // Only update A1T if it was not fixed
+      if (!fixedA) {
+        this.a1tl[ch] = aAddr;
+      }
       this.das[ch] = 0;
     }
   }
@@ -687,7 +704,12 @@ export class SNESBus implements IMemoryBus {
 
     // PPU MMIO $2100-$213F only
     if (off >= 0x2100 && off <= 0x213f) {
-      this.ppu.writeReg(off & 0x00ff, value & 0xff);
+      const reg = off & 0x00ff;
+      // Debug: log VRAM-related registers
+      // if (reg === 0x16 || reg === 0x17 || reg === 0x18 || reg === 0x19) {
+      //   console.log(`VRAM reg write: $21${reg.toString(16).padStart(2,'0')} = 0x${(value & 0xff).toString(16).padStart(2,'0')}`);
+      // }
+      this.ppu.writeReg(reg, value & 0xff);
       return;
     }
 
@@ -964,6 +986,9 @@ export class SNESBus implements IMemoryBus {
 
     // MDMAEN $420B
     if (off === 0x420b) {
+      // Debug: log current VRAM address before DMA
+      const ppuAny = this.ppu as any;
+      console.log(`DMA triggered (MDMAEN=$${(value & 0xff).toString(16).padStart(2,'0')}), current VRAM addr=0x${(ppuAny.vaddr || 0).toString(16).padStart(4,'0')}`);
       this.performMDMA(value & 0xff);
       return;
     }

@@ -212,14 +212,20 @@ export class TimingPPU implements IPPU {
       }
       // BG12NBA $210B
       case 0x0b: {
-        this.bg1CharBaseWord = ((v >> 4) & 0x0f) << 11;
-        this.bg2CharBaseWord = (v & 0x0f) << 11;
+        // Hardware mapping (units of 0x1000 bytes = 0x800 words):
+        // - BG1 char base = LOW nibble  * 0x1000 bytes (0x800 words)
+        // - BG2 char base = HIGH nibble * 0x1000 bytes (0x800 words)
+        this.bg1CharBaseWord = (v & 0x0f) << 11;         // BG1 uses LOW nibble
+        this.bg2CharBaseWord = ((v >> 4) & 0x0f) << 11;  // BG2 uses HIGH nibble
         break;
       }
       // BG34NBA $210C
       case 0x0c: {
-        this.bg3CharBaseWord = ((v >> 4) & 0x0f) << 11;
-        this.bg4CharBaseWord = (v & 0x0f) << 11;
+        // Hardware mapping (units of 0x1000 bytes = 0x800 words):
+        // - BG3 char base = LOW nibble  * 0x1000 bytes (0x800 words)
+        // - BG4 char base = HIGH nibble * 0x1000 bytes (0x800 words)
+        this.bg3CharBaseWord = (v & 0x0f) << 11;         // BG3 uses LOW nibble
+        this.bg4CharBaseWord = ((v >> 4) & 0x0f) << 11;  // BG4 uses HIGH nibble
         break;
       }
       // BGMODE $2105 (bit4: BG1 16x16; bit5: BG2 16x16; bit6: BG3 16x16; bit7: BG4 16x16)

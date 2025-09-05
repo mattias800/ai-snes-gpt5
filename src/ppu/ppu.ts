@@ -311,24 +311,23 @@ export class PPU {
         break;
       }
       case 0x0b: { // BG12NBA ($210B)
-        // Hardware mapping:
-        // - BG1 char base = LOW nibble * 0x1000 bytes (0x800 words)
+        // Hardware mapping (units of 0x1000 bytes = 0x800 words):
+        // - BG1 char base = LOW nibble  * 0x1000 bytes (0x800 words)
         // - BG2 char base = HIGH nibble * 0x1000 bytes (0x800 words)
-        // Standard SNES hardware uses units of 0x800 words (<<11)
         const low = v & 0x0f;
         const high = (v >> 4) & 0x0f;
-        this.bg1CharBaseWord = (low & 0x0f) << 11;
-        this.bg2CharBaseWord = (high & 0x0f) << 11;
+        this.bg1CharBaseWord = (low & 0x0f) << 11;   // BG1 uses LOW nibble
+        this.bg2CharBaseWord = (high & 0x0f) << 11;  // BG2 uses HIGH nibble
         break;
       }
       case 0x0c: { // BG34NBA ($210C)
-        // Hardware mapping (same units as BG12NBA):
-        // - BG3 char base = LOW nibble * 0x1000 bytes (0x800 words)  
+        // Hardware mapping (units of 0x1000 bytes = 0x800 words):
+        // - BG3 char base = LOW nibble  * 0x1000 bytes (0x800 words)
         // - BG4 char base = HIGH nibble * 0x1000 bytes (0x800 words)
         const low = v & 0x0f;
         const high = (v >> 4) & 0x0f;
-        this.bg3CharBaseWord = (low & 0x0f) << 11;
-        this.bg4CharBaseWord = (high & 0x0f) << 11;
+        this.bg3CharBaseWord = (low & 0x0f) << 11;   // BG3 uses LOW nibble
+        this.bg4CharBaseWord = (high & 0x0f) << 11;  // BG4 uses HIGH nibble
         break;
       }
       case 0x05: { // BGMODE ($2105)
