@@ -1,0 +1,3 @@
+focus :maincpu
+trace /Users/mattias800/temp/ai-snes-gpt5/artifacts/trace/cputest_full_mame.log
+go

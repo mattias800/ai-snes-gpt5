@@ -33,6 +33,28 @@ export const enum Flag {
 export class CPU65C816 {
   constructor(private bus: IMemoryBus) {}
 
+  // Debug: stack op logging and call-stack tracking (enabled via CPU_STACK_LOG=1)
+  private get stackLogEnabled(): boolean {
+    try {
+      // @ts-ignore
+      return typeof process !== 'undefined' && (process?.env?.CPU_STACK_LOG === '1' || process?.env?.CPU_STACK_LOG === 'true');
+    } catch {
+      return false;
+    }
+  }
+  private callFrames: { type: 'JSR' | 'JSL'; fromPBR: number; fromPC: number; toPBR: number; toPC: number; sAtCall: number }[] = [];
+  private recordStackEvent(ev: any): void {
+    if (!this.stackLogEnabled) return;
+    try {
+      const g = (globalThis as any);
+      g.__stackLog = g.__stackLog || [];
+      g.__stackLog.push(ev);
+      if (g.__stackLog.length > 2048) g.__stackLog.shift();
+      // Also publish current call frames for external readers
+      g.__callFrames = this.callFrames.slice(-64);
+    } catch { /* noop */ }
+  }
+
   private get debugEnabled(): boolean {
     try {
       // @ts-ignore
@@ -200,12 +222,12 @@ export class CPU65C816 {
   // Tests expect: when X/Y are 16-bit (native, X flag clear), use full 16-bit index for dp+index (no 8-bit wrap of the index).
   // When X/Y are 8-bit (E=1 or X flag set), use 8-bit wrap for dp+index.
   private effDPIndexed(dp: number, useX: boolean): Word {
-    const D = this.dpBase();
-    const idx = useX ? this.indexX() : this.indexY();
-    const effOffset = (this.x8
-      ? (((dp & 0xff) + (idx & 0xff)) & 0xff)
-      : (((dp & 0xff) + idx) & 0xffff));
-    return (D + effOffset) & 0xffff;
+    // Direct page indexed effective address uses DP page base and 8-bit wrap on the offset.
+    // The index contribution uses the low 8 bits of X/Y (hardware uses X/Y low for DP).
+    const pageBase = this.state.E ? 0x0000 : (this.state.D & 0xff00);
+    const idxLow = (useX ? this.state.X : this.state.Y) & 0xff;
+    const off = ((dp & 0xff) + idxLow) & 0xff;
+    return ((pageBase | off) & 0xffff) as Word;
   }
 
   // Helpers for direct page and stack-relative pointer fetches with correct wrap semantics
@@ -217,8 +239,11 @@ export class CPU65C816 {
     return (this.state.D & 0xffff) as Word;
   }
   private dpAddr(off8: number): Word {
-    const D = this.dpBase();
-    return (D + (off8 & 0xff)) & 0xffff;
+    // Hardware semantics for direct page addressing:
+    // - In native mode (E=0): effective address = (D & 0xFF00) | (off8 & 0xFF)
+    // - In emulation mode (E=1): direct page is fixed to page 0 -> 0x0000 | (off8 & 0xFF)
+    const pageBase = this.state.E ? 0x0000 : (this.state.D & 0xff00);
+    return ((pageBase | (off8 & 0xff)) & 0xffff) as Word;
   }
   private dpPtr16(off8: number): Word {
     // (dp) 16-bit pointer fetch.
@@ -281,17 +306,18 @@ export class CPU65C816 {
     const xLow = this.state.X & 0xff;
 
     if (!this.state.E) {
-      // Native mode expectation from test suite: use full X register if X flag is clear.
-      // Base is (D + dp + X) & 0xFFFF where X is either 8-bit (if X flag set) or 16-bit (if X flag clear).
-      const xValue = this.x8 ? (this.state.X & 0xff) : (this.state.X & 0xffff);
-      const base = (D + dp + xValue) & 0xffff;
-      const loAddr = base;
-      const hiAddr = (base + 1) & 0xffff;
+      // Native mode (E=0): (dp,X) uses the low 8 bits of X to pre-index the 8-bit dp operand,
+      // wrapping within the direct page, regardless of X width. The pointer bytes are read at
+      // D + prime and D + ((prime + 1) & 0xFF).
+      const prime = (dp + xLow) & 0xff;
+      const pageBase = D & 0xff00;
+      const loAddr = (pageBase | prime) & 0xffff;
+      const hiAddr = (pageBase | ((prime + 1) & 0xff)) & 0xffff;
       const lo = this.read8(0x00, loAddr as Word);
       const hi = this.read8(0x00, hiAddr as Word);
       const ptr = ((hi << 8) | lo) & 0xffff;
       if (this.debugEnabled) {
-        this.dbg(`[dpXPtr16.E=0] D=$${D.toString(16).padStart(4,'0')} dp=$${dp.toString(16).padStart(2,'0')} Xlow=$${xLow.toString(16).padStart(2,'0')} base=$${base.toString(16).padStart(4,'0')} -> ptr=$${ptr.toString(16).padStart(4,'0')}`);
+        this.dbg(`[dpXPtr16.E=0] D=$${D.toString(16).padStart(4,'0')} dp=$${dp.toString(16).padStart(2,'0')} Xlow=$${xLow.toString(16).padStart(2,'0')} loAddr=$${loAddr.toString(16).padStart(4,'0')} hiAddr=$${hiAddr.toString(16).padStart(4,'0')} -> ptr=$${ptr.toString(16).padStart(4,'0')}`);
       }
       return ptr;
     }
@@ -425,6 +451,7 @@ export class CPU65C816 {
 
   private push8(v: Byte): void {
     // Stack page is 0x0100 in emulation; full 16-bit S in native. Stack always in bank 0.
+    const sBefore = this.state.S & 0xffff;
     const spAddr: Word = this.state.E ? ((0x0100 | (this.state.S & 0xff)) & 0xffff) : (this.state.S & 0xffff);
     this.write8(0x00, spAddr as Word, v);
     if (this.state.E) {
@@ -432,16 +459,20 @@ export class CPU65C816 {
     } else {
       this.state.S = (this.state.S - 1) & 0xffff;
     }
+    this.recordStackEvent({ kind: 'push', PBR: this.state.PBR & 0xff, PC: this.state.PC & 0xffff, S_before: sBefore, S_after: this.state.S & 0xffff, addr: spAddr & 0xffff, value: v & 0xff, E: this.state.E ? 1 : 0 });
   }
 
   private pull8(): Byte {
+    const sBefore = (this.state.S & 0xffff);
     if (this.state.E) {
       this.state.S = ((this.state.S + 1) & 0xff) | 0x0100;
     } else {
       this.state.S = (this.state.S + 1) & 0xffff;
     }
     const spAddr: Word = this.state.E ? ((0x0100 | (this.state.S & 0xff)) & 0xffff) : (this.state.S & 0xffff);
-    return this.read8(0x00, spAddr as Word);
+    const val = this.read8(0x00, spAddr as Word);
+    this.recordStackEvent({ kind: 'pull', PBR: this.state.PBR & 0xff, PC: this.state.PC & 0xffff, S_before: sBefore, S_after: this.state.S & 0xffff, addr: spAddr & 0xffff, value: val & 0xff, E: this.state.E ? 1 : 0 });
+    return val;
   }
 
   private fetch8(): Byte {
@@ -719,6 +750,17 @@ export class CPU65C816 {
       // High byte of S forced to 0x01
       this.state.S = (this.state.S & 0xff) | 0x0100;
     }
+    // Log program bank changes (when enabled)
+    if (this.debugEnabled) {
+      try {
+        const g = (globalThis as unknown as GlobalWithTrace);
+        const last = g.__lastPC;
+        const beforePBR = (last?.PBR ?? this.state.PBR) & 0xff;
+        if (((this.state.PBR & 0xff) !== (beforePBR & 0xff))) {
+          this.dbg(`[PBR] change ${beforePBR.toString(16).padStart(2,'0')} -> ${this.state.PBR.toString(16).padStart(2,'0')} at ${this.state.PBR.toString(16).padStart(2,'0')}:${this.state.PC.toString(16).padStart(4,'0')}`);
+        }
+      } catch { /* noop */ }
+    }
   }
 
   private applyWidthAfterPChange(): void {
@@ -759,7 +801,7 @@ export class CPU65C816 {
     const vecHiAddr = (vecLoAddr + 1) & 0xffff;
     const lo = this.read8(0x00, vecLoAddr as Word);
     const hi = this.read8(0x00, vecHiAddr as Word);
-    this.state.PBR = 0x00;
+    // On 65C816, PBR is NOT altered on interrupt entry in native mode; only PC is loaded from vectors.
     this.state.PC = ((hi << 8) | lo) & 0xffff;
   }
 
@@ -787,7 +829,7 @@ export class CPU65C816 {
     const vecHiAddr = (vecLoAddr + 1) & 0xffff;
     const lo = this.read8(0x00, vecLoAddr as Word);
     const hi = this.read8(0x00, vecHiAddr as Word);
-    this.state.PBR = 0x00;
+    // Do not alter PBR on IRQ entry in native mode; load PC from vectors only.
     this.state.PC = ((hi << 8) | lo) & 0xffff;
   }
 
@@ -812,16 +854,22 @@ export class CPU65C816 {
       g.__lastA = { A8: this.state.A & 0xff, A16: this.state.A & 0xffff };
     } catch { void 0; }
     const opcode = this.fetch8();
+    const prevXFlag = (this.state.P & Flag.X) !== 0;
     if (this.debugEnabled) {
       const pHex = (this.state.P & 0xff).toString(16).padStart(2, '0');
       this.dbg(`[CPU] E=${this.state.E ? 1 : 0} P=$${pHex} m8=${this.m8 ? 1 : 0} x8=${this.x8 ? 1 : 0} @ ${prevPBR.toString(16).padStart(2,'0')}:${prevPC.toString(16).padStart(4,'0')} OP=$${opcode.toString(16).padStart(2,'0')}`);
+      // Focused probe around 00:83C0-00:83F0 to catch REP/SEP and flag state
+      if (prevPBR === 0x00 && prevPC >= 0x83c0 && prevPC <= 0x83f0) {
+        this.dbg(`[CPU:PROBE] pre PC=${prevPC.toString(16)} P=$${(this.state.P & 0xff).toString(16)} E=${this.state.E?1:0}`);
+      }
     }
+    // After executing the instruction, we will detect PBR changes. To do this, we finish the switch
     // Maintain a tiny ring buffer of recent instructions (PC/opcode) for targeted debug dumps
     try {
       const g2 = (globalThis as unknown as GlobalWithTrace);
       g2.__lastIR = g2.__lastIR || [];
       g2.__lastIR.push({ PBR: prevPBR, PC: prevPC, OP: opcode & 0xff, A8: this.state.A & 0xff, A16: this.state.A & 0xffff });
-      if (g2.__lastIR.length > 64) g2.__lastIR.shift();
+      if (g2.__lastIR.length > 512) g2.__lastIR.shift();
     } catch { void 0; }
     switch (opcode) {
       // NOP (in 65C816, 0xEA)
@@ -1293,17 +1341,20 @@ this.dbg(`[ADC abs,Y] m8=0 DBR=$${(effBank & 0xff).toString(16).padStart(2,'0')}
 
       // BRK: vector depends on E (emulation/native)
       case 0x00: {
-        const pc = this.state.PC;
+        // BRK/COP are 2-byte instructions (opcode + signature). On 65C816, the return PC pushed is
+        // the address of the signature byte (i.e., PC as it stands after fetching the opcode).
+        // Tests expect RTI to return to PC+1 (the signature) for BRK.
+        const retPC = this.state.PC & 0xffff;
         if (this.state.E) {
-          // Emulation: push PCH, PCL, P
-          this.push8((pc >>> 8) & 0xff);
-          this.push8(pc & 0xff);
+          // Emulation: push PCH, PCL, then P (no PBR)
+          this.push8((retPC >>> 8) & 0xff);
+          this.push8(retPC & 0xff);
           this.push8(this.state.P & 0xff);
         } else {
           // Native: push PBR, PCH, PCL, P
           this.push8(this.state.PBR & 0xff);
-          this.push8((pc >>> 8) & 0xff);
-          this.push8(pc & 0xff);
+          this.push8((retPC >>> 8) & 0xff);
+          this.push8(retPC & 0xff);
           this.push8(this.state.P & 0xff);
         }
         // Set I flag and dispatch
@@ -1312,24 +1363,26 @@ this.dbg(`[ADC abs,Y] m8=0 DBR=$${(effBank & 0xff).toString(16).padStart(2,'0')}
         const vecHiAddr = (vecLoAddr + 1) & 0xffff;
         const lo = this.read8(0x00, vecLoAddr as Word);
         const hi = this.read8(0x00, vecHiAddr as Word);
-        this.state.PBR = 0x00;
+        // PBR remains unchanged on BRK in native mode; only PC is loaded from vectors.
         this.state.PC = ((hi << 8) | lo) & 0xffff;
         break;
       }
 
       // COP: software interrupt, vector depends on E
       case 0x02: {
-        const pc = this.state.PC;
+        // COP is 2 bytes (opcode + signature). Push return PC pointing to the signature byte
+        // (tests expect RTI to resume at signature for COP as well).
+        const retPC = this.state.PC & 0xffff;
         if (this.state.E) {
           // Emulation: push PCH, PCL, P
-          this.push8((pc >>> 8) & 0xff);
-          this.push8(pc & 0xff);
+          this.push8((retPC >>> 8) & 0xff);
+          this.push8(retPC & 0xff);
           this.push8(this.state.P & 0xff);
         } else {
           // Native: push PBR, PCH, PCL, P
           this.push8(this.state.PBR & 0xff);
-          this.push8((pc >>> 8) & 0xff);
-          this.push8(pc & 0xff);
+          this.push8((retPC >>> 8) & 0xff);
+          this.push8(retPC & 0xff);
           this.push8(this.state.P & 0xff);
         }
         this.state.P |= Flag.I;
@@ -1337,7 +1390,7 @@ this.dbg(`[ADC abs,Y] m8=0 DBR=$${(effBank & 0xff).toString(16).padStart(2,'0')}
         const vecHiAddr = (vecLoAddr + 1) & 0xffff;
         const lo = this.read8(0x00, vecLoAddr as Word);
         const hi = this.read8(0x00, vecHiAddr as Word);
-        this.state.PBR = 0x00;
+        // PBR remains unchanged on COP in native mode; only PC is loaded from vectors.
         this.state.PC = ((hi << 8) | lo) & 0xffff;
         break;
       }
@@ -2123,15 +2176,25 @@ this.write16(effBank, eff, m & 0xffff);
       // BEQ/BNE/BCC/BCS/BPL/BMI relative
       case 0xf0: { // BEQ
         const off = this.fetch8() << 24 >> 24; // sign-extend
-        if ((this.state.P & Flag.Z) !== 0) {
+        const z = (this.state.P & Flag.Z) !== 0;
+        if (this.debugEnabled) {
+          this.dbg(`[BEQ] Z=${z?1:0} off=${off} PC_pre=${this.state.PC.toString(16).padStart(4,'0')}`);
+        }
+        if (z) {
           this.state.PC = (this.state.PC + off) & 0xffff;
+          if (this.debugEnabled) this.dbg(`[BEQ] taken -> PC=${this.state.PC.toString(16).padStart(4,'0')}`);
         }
         break;
       }
       case 0xd0: { // BNE
         const off = this.fetch8() << 24 >> 24;
-        if ((this.state.P & Flag.Z) === 0) {
+        const z = (this.state.P & Flag.Z) !== 0;
+        if (this.debugEnabled) {
+          this.dbg(`[BNE] Z=${z?1:0} off=${off} PC_pre=${this.state.PC.toString(16).padStart(4,'0')}`);
+        }
+        if (!z) {
           this.state.PC = (this.state.PC + off) & 0xffff;
+          if (this.debugEnabled) this.dbg(`[BNE] taken -> PC=${this.state.PC.toString(16).padStart(4,'0')}`);
         }
         break;
       }
@@ -2497,8 +2560,14 @@ this.write16(bank, eff, 0x0000);
         const target = this.fetch16();
         // Push (PC-1) high then low
         const ret = (this.state.PC - 1) & 0xffff;
+        const fromPC = (this.state.PC - 3) & 0xffff; // opcode(1) + operand(2)
         this.push8((ret >>> 8) & 0xff);
         this.push8(ret & 0xff);
+        // Debug call frame
+        if (this.stackLogEnabled) {
+          this.callFrames.push({ type: 'JSR', fromPBR: this.state.PBR & 0xff, fromPC, toPBR: this.state.PBR & 0xff, toPC: target & 0xffff, sAtCall: this.state.S & 0xffff });
+          this.recordStackEvent({ kind: 'evt', evt: 'JSR', fromPBR: this.state.PBR & 0xff, fromPC, toPBR: this.state.PBR & 0xff, toPC: target & 0xffff, S: this.state.S & 0xffff });
+        }
         this.state.PC = target;
         break;
       }
@@ -2509,22 +2578,38 @@ this.write16(bank, eff, 0x0000);
         const hi = this.read8(this.state.PBR, (eff + 1) & 0xffff);
         const target = ((hi << 8) | lo) & 0xffff;
         const ret = (this.state.PC - 1) & 0xffff;
+        const fromPC = (this.state.PC - 3) & 0xffff;
         this.push8((ret >>> 8) & 0xff);
         this.push8(ret & 0xff);
+        if (this.stackLogEnabled) {
+          this.callFrames.push({ type: 'JSR', fromPBR: this.state.PBR & 0xff, fromPC, toPBR: this.state.PBR & 0xff, toPC: target & 0xffff, sAtCall: this.state.S & 0xffff });
+          this.recordStackEvent({ kind: 'evt', evt: 'JSR(X)', fromPBR: this.state.PBR & 0xff, fromPC, toPBR: this.state.PBR & 0xff, toPC: target & 0xffff, S: this.state.S & 0xffff });
+        }
         this.state.PC = target;
         break;
       }
       case 0x22: { // JSL long absolute
+        const pcBefore = this.state.PC;
+        const pbrBefore = this.state.PBR;
         const targetLo = this.fetch8();
         const targetHi = this.fetch8();
         const targetBank = this.fetch8();
+        const targetAddr = ((targetHi << 8) | targetLo) & 0xffff;
         // Push return: PBR then PC-1 (high, low)
         const ret = (this.state.PC - 1) & 0xffff;
         this.push8(this.state.PBR);
         this.push8((ret >>> 8) & 0xff);
         this.push8(ret & 0xff);
+        if (this.stackLogEnabled) {
+          const fromPC = (pcBefore - 1 /* opcode already fetched */ - 3 /* operands */) & 0xffff;
+          this.callFrames.push({ type: 'JSL', fromPBR: pbrBefore & 0xff, fromPC, toPBR: targetBank & 0xff, toPC: targetAddr & 0xffff, sAtCall: this.state.S & 0xffff });
+          this.recordStackEvent({ kind: 'evt', evt: 'JSL', fromPBR: pbrBefore & 0xff, fromPC, toPBR: targetBank & 0xff, toPC: targetAddr & 0xffff, S: this.state.S & 0xffff });
+        }
         this.state.PBR = targetBank & 0xff;
-        this.state.PC = ((targetHi << 8) | targetLo) & 0xffff;
+        this.state.PC = targetAddr;
+        if (this.debugEnabled) {
+          this.dbg(`[JSL] from ${pbrBefore.toString(16).padStart(2,'0')}:${pcBefore.toString(16).padStart(4,'0')} -> ${this.state.PBR.toString(16).padStart(2,'0')}:${this.state.PC.toString(16).padStart(4,'0')} ret=${ret.toString(16).padStart(4,'0')}`);
+        }
         break;
       }
       case 0x4c: { // JMP abs
@@ -2534,8 +2619,11 @@ this.write16(bank, eff, 0x0000);
       }
       case 0x6c: { // JMP (abs)
         const ptr = this.fetch16();
-        const lo = this.read8(this.state.PBR, ptr);
-        const hi = this.read8(this.state.PBR, (ptr + 1) & 0xffff);
+        // On 65C816, absolute-indirect pointer bytes are fetched from bank 0 (not PBR).
+        // High byte wraps within the same page (6502/SNES quirk).
+        const lo = this.read8(0x00, ptr);
+        const hiAddr = (ptr & 0xff00) | ((ptr + 1) & 0x00ff);
+        const hi = this.read8(0x00, hiAddr);
         this.state.PC = ((hi << 8) | lo) & 0xffff;
         break;
       }
@@ -2543,41 +2631,75 @@ this.write16(bank, eff, 0x0000);
         const base = this.fetch16();
         const eff = (base + this.indexX()) & 0xffff;
         const lo = this.read8(this.state.PBR, eff);
+        // 65C816 semantics: fetch high byte from (eff + 1) within the same bank (no page wrap quirk)
         const hi = this.read8(this.state.PBR, (eff + 1) & 0xffff);
         this.state.PC = ((hi << 8) | lo) & 0xffff;
         break;
       }
       case 0x6b: { // RTL
+        const sBefore = this.state.S & 0xffff;
         const lo = this.pull8();
         const hi = this.pull8();
         const bank = this.pull8();
-        this.state.PBR = bank & 0xff;
         const addr = ((hi << 8) | lo) & 0xffff;
-        this.state.PC = (addr + 1) & 0xffff;
+        const newPC = (addr + 1) & 0xffff;
+        if (this.stackLogEnabled) {
+          this.recordStackEvent({ kind: 'evt', evt: 'RTL', fromPBR: this.state.PBR & 0xff, fromPC: ((this.state.PC - 1) & 0xffff), toPBR: bank & 0xff, toPC: newPC & 0xffff, S_before: sBefore, S_after: this.state.S & 0xffff });
+          // Pop the most recent JSL frame if present
+          for (let i = this.callFrames.length - 1; i >= 0; i--) {
+            if (this.callFrames[i]?.type === 'JSL') { this.callFrames.splice(i, 1); break; }
+          }
+        }
+        if (this.debugEnabled) {
+          this.dbg(`[RTL] -> bank=${bank.toString(16).padStart(2,'0')} addr=${addr.toString(16).padStart(4,'0')} nextPC=${newPC.toString(16).padStart(4,'0')}`);
+        }
+        this.state.PBR = bank & 0xff;
+        this.state.PC = newPC;
         break;
       }
       case 0x5c: { // JML long absolute (jump, not subroutine)
+        const pcBefore = this.state.PC;
+        const pbrBefore = this.state.PBR;
         const targetLo = this.fetch8();
         const targetHi = this.fetch8();
         const targetBank = this.fetch8();
         this.state.PBR = targetBank & 0xff;
         this.state.PC = ((targetHi << 8) | targetLo) & 0xffff;
+        if (this.debugEnabled) {
+          this.dbg(`[JML] from ${pbrBefore.toString(16).padStart(2,'0')}:${pcBefore.toString(16).padStart(4,'0')} -> ${this.state.PBR.toString(16).padStart(2,'0')}:${this.state.PC.toString(16).padStart(4,'0')}`);
+        }
         break;
       }
       case 0xdc: { // JML [abs] (absolute indirect long)
+        const pcBefore = this.state.PC;
+        const pbrBefore = this.state.PBR;
         const ptr = this.fetch16();
-        const lo = this.read8(0x00, ptr);
-        const hi = this.read8(0x00, (ptr + 1) & 0xffff);
-        const bank = this.read8(0x00, (ptr + 2) & 0xffff) & 0xff;
+        // Per 65C816 spec, absolute-indirect-long pointer bytes are fetched from bank 0 (not DBR).
+        const ptrBank: Byte = 0x00;
+        const lo = this.read8(ptrBank, ptr);
+        const hi = this.read8(ptrBank, (ptr + 1) & 0xffff);
+        const bank = this.read8(ptrBank, (ptr + 2) & 0xffff) & 0xff;
         this.state.PBR = bank;
         this.state.PC = ((hi << 8) | lo) & 0xffff;
+        if (this.debugEnabled) {
+          this.dbg(`[JML[abs]] from ${pbrBefore.toString(16).padStart(2,'0')}:${pcBefore.toString(16).padStart(4,'0')} via ${ptrBank.toString(16).padStart(2,'0')}:${ptr.toString(16).padStart(4,'0')} -> ${this.state.PBR.toString(16).padStart(2,'0')}:${this.state.PC.toString(16).padStart(4,'0')}`);
+        }
         break;
       }
       case 0x60: { // RTS
+        const sBefore = this.state.S & 0xffff;
         const lo = this.pull8();
         const hi = this.pull8();
         const addr = ((hi << 8) | lo) & 0xffff;
-        this.state.PC = (addr + 1) & 0xffff;
+        const newPC = (addr + 1) & 0xffff;
+        if (this.stackLogEnabled) {
+          this.recordStackEvent({ kind: 'evt', evt: 'RTS', fromPBR: this.state.PBR & 0xff, fromPC: ((this.state.PC - 1) & 0xffff), toPBR: this.state.PBR & 0xff, toPC: newPC & 0xffff, S_before: sBefore, S_after: this.state.S & 0xffff });
+          // Pop the most recent JSR frame if present
+          for (let i = this.callFrames.length - 1; i >= 0; i--) {
+            if (this.callFrames[i]?.type === 'JSR') { this.callFrames.splice(i, 1); break; }
+          }
+        }
+        this.state.PC = newPC;
         break;
       }
 
@@ -4297,6 +4419,8 @@ case 0xc9: { // CMP #imm
       default:
         throw new Error(`Unimplemented opcode: ${opcode.toString(16)}`);
     }
+    // Synthetic timing tick per instruction (for CPU-only compare when enabled)
+    try { (this.bus as any)?.tickInstr?.(1); } catch { /* noop */ }
   }
 }
 

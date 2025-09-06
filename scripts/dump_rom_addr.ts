@@ -3,6 +3,7 @@ import { Cartridge } from '../src/cart/cartridge.js';
 import { normaliseRom } from '../src/cart/loader.js';
 import { Emulator } from '../src/emulator/core.js';
 import fs from 'fs';
+import { parseHeader } from '../src/cart/header.js';
 
 function parseArgs(argv: string[]) {
   const out: Record<string,string|number|boolean> = {};
@@ -32,7 +33,8 @@ async function main() {
   }
   const raw = fs.readFileSync(romPath);
   const { rom } = normaliseRom(new Uint8Array(raw));
-  const cart = new Cartridge({ rom });
+  const header = parseHeader(rom);
+  const cart = new Cartridge({ rom, mapping: header.mapping });
   const emu = Emulator.fromCartridge(cart);
   emu.reset();
 

@@ -46,6 +46,9 @@ export class SNESBus implements IMemoryBus {
   private controller1 = new Controller();
   private ctrlStrobe = 0;
 
+  // WRAM data port ($2180-$2183)
+  private wramAddr = 0; // 17-bit address into 128 KiB WRAM (0..0x1FFFF)
+
   // APU I/O stub ports
   private apuToCpu = new Uint8Array(4); // values read by CPU at $2140-$2143
   private cpuToApu = new Uint8Array(4); // last written by CPU at $2140-$2143
@@ -57,6 +60,15 @@ export class SNESBus implements IMemoryBus {
   // CPU I/O registers we model minimally
   private nmitimen = 0; // $4200 (bit7 enables NMI)
   private nmiOccurred = 0; // latched NMI flag for $4210 bit7
+  // Optional auto-NMI fallback when running CPU-only comparisons without scheduler timing
+  private autoNmiOnRdnmiReads = false;
+  private autoNmiThresholdReads = 2;
+  private autoNmiReadCounter = 0;
+  // Optional auto-HVBJOY fallback when running CPU-only comparisons without scheduler timing ($4212 bit7 toggling)
+  private autoHvbOnReads = false;
+  private autoHvbThresholdReads = 64;
+  private autoHvbReadCounter = 0;
+  private autoHvbVBlankState = 0; // 0 or 1; when enabled, toggles every threshold reads
 
   // Math registers (8x8 multiply, 16/8 divide)
   private wrmpya = 0; // $4202
@@ -103,6 +115,13 @@ export class SNESBus implements IMemoryBus {
   private smwHackCcReads = 0;
   private smwHackZeroReads = 0;
 
+  // Synthetic timing model for CPU-only runs (instruction-count based H/V timing)
+  private simTimingEnabled = false;
+  private simInstrPerScanline = 100;
+  private simHBlankInstr = 12; // ~1/8 of scanline
+  private simInstrInScanline = 0;
+  private simFrameStarted = false;
+
   // Optional SPC700 APU stub
   private spc: SPC700 | null = null;
   private apuDevice: APUDevice | null = null;
@@ -113,6 +132,26 @@ export class SNESBus implements IMemoryBus {
     try {
       // @ts-ignore
       const env = (globalThis as any).process?.env ?? {};
+      // Optional: initialize WRAM to a specific byte pattern for CPU-compare determinism (e.g., 'ff' or '00')
+      const wramInitRaw = (env.SNES_WRAM_INIT ?? '').toString();
+      if (wramInitRaw && wramInitRaw.trim().length > 0) {
+        const cleaned = wramInitRaw.trim().replace(/^\$/,'').toLowerCase();
+        const val = cleaned.startsWith('0x') ? Number(cleaned) : (/^[0-9a-f]{1,2}$/i.test(cleaned) ? parseInt(cleaned, 16) : Number(cleaned));
+        if (Number.isFinite(val)) this.wram.fill((val as number) & 0xff);
+      }
+      // Optional: initial RDNMI latch value (for CPU-only compare modes). Default 0 to satisfy timing tests.
+      const initNmi = (env.SNES_RDNMI_INIT ?? env.SMW_RDNMI_INIT ?? '0');
+      this.nmiOccurred = (initNmi === '1' || initNmi.toLowerCase?.() === 'true') ? 1 : 0;
+      // Optional: enable auto NMI pulsing based on repeated $4210 reads (helps break busy-wait loops in CPU-only runs)
+      const autoNmi = (env.SNES_AUTOPULSE_NMI ?? env.SMW_AUTOPULSE_NMI ?? '0');
+      this.autoNmiOnRdnmiReads = (autoNmi === '1' || autoNmi.toLowerCase?.() === 'true');
+      const thrRaw = Number(env.SNES_AUTOPULSE_NMI_THRESHOLD ?? '2');
+      if (Number.isFinite(thrRaw) && thrRaw >= 1 && thrRaw <= 65535) this.autoNmiThresholdReads = thrRaw | 0;
+      // Optional: enable auto HVBJOY bit7 toggling based on repeated $4212 reads (helps break busy-wait loops)
+      const autoHvb = (env.SNES_AUTOPULSE_HVBJOY ?? env.SMW_AUTOPULSE_HVBJOY ?? '0');
+      this.autoHvbOnReads = (autoHvb === '1' || autoHvb.toLowerCase?.() === 'true');
+      const hvbThrRaw = Number(env.SNES_AUTOPULSE_HVBJOY_THRESHOLD ?? '64');
+      if (Number.isFinite(hvbThrRaw) && hvbThrRaw >= 1 && hvbThrRaw <= 65535) this.autoHvbThresholdReads = hvbThrRaw | 0;
       this.logMMIO = env.SMW_LOG_MMIO === '1' || env.SMW_LOG_MMIO === 'true';
       this.logPc = env.SMW_LOG_PC === '1' || env.SMW_LOG_PC === 'true' || env.SMW_LOG_MMIO_PC === '1' || env.SMW_LOG_MMIO_PC === 'true';
       const lim = Number(env.SMW_LOG_LIMIT ?? '1000');
@@ -126,6 +165,49 @@ export class SNESBus implements IMemoryBus {
       const ddepth = Number(env.SMW_DUMP_TRACE_DEPTH ?? '16');
       if (Number.isFinite(ddepth) && ddepth >= 1 && ddepth <= 256) this.dumpTraceDepth = ddepth | 0;
       if (Number.isFinite(lim) && lim > 0) this.logLimit = lim;
+
+      // Synthetic timing env (disabled by default):
+      // - SNES_TIMING_SIM=1 enables instruction-count based H/V timing
+      // - SNES_TIMING_IPS sets instructions per scanline (default 100)
+      // - SNES_TIMING_HBLANK_FRAC sets hblank as 1/N of scanline (default 8)
+      const sim = (env.SNES_TIMING_SIM ?? '0');
+      this.simTimingEnabled = sim === '1' || sim.toLowerCase?.() === 'true';
+      const ips = Number(env.SNES_TIMING_IPS ?? '100');
+      if (Number.isFinite(ips) && ips >= 1 && ips <= 100000) this.simInstrPerScanline = (ips|0);
+      const hfrac = Number(env.SNES_TIMING_HBLANK_FRAC ?? '8');
+      if (Number.isFinite(hfrac) && hfrac >= 2 && hfrac <= 1024) this.simHBlankInstr = Math.max(1, Math.floor(this.simInstrPerScanline / hfrac));
+
+      // Optional: preset specific WRAM addresses via SNES_WRAM_PRESET="bb:aaaa:vv,7f002f:aa"
+      const presetRaw = (env.SNES_WRAM_PRESET ?? '').toString();
+      if (presetRaw && presetRaw.trim().length > 0) {
+        const items = presetRaw.split(',');
+        for (const it of items) {
+          const t = it.trim();
+          if (!t) continue;
+          const m = t.match(/^\s*([^:=]+)\s*[:=]\s*([^:=]+)\s*$/);
+          if (!m) continue;
+          const aStr = m[1].replace(/[$_\s]/g,'').toLowerCase();
+          const vStr = m[2].replace(/[$_\s]/g,'').toLowerCase();
+          const val = vStr.startsWith('0x') ? Number(vStr) : (/^[0-9a-f]{1,2}$/i.test(vStr) ? parseInt(vStr,16) : Number(vStr));
+          if (!Number.isFinite(val)) continue;
+          let addr24 = -1;
+          if (/^[0-9a-f]{6}$/i.test(aStr)) {
+            addr24 = parseInt(aStr, 16) & 0xffffff;
+          } else {
+            const m2 = aStr.match(/^([0-9a-f]{2})[:]?([0-9a-f]{4})$/i);
+            if (m2) addr24 = ((parseInt(m2[1],16)&0xff)<<16) | (parseInt(m2[2],16)&0xffff);
+          }
+          if (addr24 >= 0) {
+            const bank = (addr24>>>16)&0xff;
+            const off = addr24 & 0xffff;
+            if (bank === 0x7e || bank === 0x7f) {
+              this.wram[this.wramIndex(bank, off)] = (val as number) & 0xff;
+            } else if ((((bank<=0x3f)|| (bank>=0x80 && bank<=0xbf))) && off < 0x2000) {
+              this.wram[off & 0x1fff] = (val as number) & 0xff;
+            }
+          }
+        }
+      }
       // Optional filter list: comma-separated list of addresses like 0x2100,4210,$4016
       const filterRaw = env.SMW_LOG_FILTER as string | undefined;
       if (filterRaw && filterRaw.trim().length > 0) {
@@ -225,6 +307,19 @@ export class SNESBus implements IMemoryBus {
       return this.wram[off & 0x1fff];
     }
 
+    // WRAM data port $2180 (read) increments address
+    if (off === 0x2180) {
+      const idx = this.wramAddr & 0x1ffff;
+      const v = this.wram[idx] & 0xff;
+      this.wramAddr = (this.wramAddr + 1) & 0x1ffff;
+      if (shouldLog) {
+        const lp: any = (globalThis as any).__lastPC || {};
+        const pcInfo = this.logPc ? ` [PC=${((lp.PBR ?? 0) & 0xff).toString(16).padStart(2,'0')}:${((lp.PC ?? 0) & 0xffff).toString(16).padStart(4,'0')}]` : '';
+        console.log(`[MMIO] R ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} -> ${v.toString(16).padStart(2,'0')} (WRAM[${(idx).toString(16)}])${pcInfo}`);
+      }
+      return v;
+    }
+
     // PPU MMIO $2100-$213F only
     if (off >= 0x2100 && off <= 0x213f) {
       const v = this.ppu.readReg(off & 0x00ff);
@@ -243,7 +338,21 @@ export class SNESBus implements IMemoryBus {
     // $4210 RDNMI: NMI occurred latch (bit7). Read clears the latch.
     if (off === 0x4210) {
       const v = (this.nmiOccurred ? 0x80 : 0x00);
+      // Clear the latch on read (hardware behavior)
       this.nmiOccurred = 0;
+      // Auto-NMI fallback: if enabled and we keep reading 0, synthesize a pulse after a threshold
+      if (this.autoNmiOnRdnmiReads) {
+        if ((v & 0x80) !== 0) {
+          // When we just observed a latched NMI, reset the counter
+          this.autoNmiReadCounter = 0;
+        } else {
+          this.autoNmiReadCounter++;
+          if (this.autoNmiReadCounter >= this.autoNmiThresholdReads) {
+            this.nmiOccurred = 1; // will be seen by the next read
+            this.autoNmiReadCounter = 0;
+          }
+        }
+      }
       if (shouldLog) {
         // eslint-disable-next-line no-console
         const lp: any = (globalThis as any).__lastPC || {};
@@ -263,6 +372,15 @@ export class SNESBus implements IMemoryBus {
         if (typeof ppuAny.isVBlank === 'function') vblank = !!ppuAny.isVBlank();
         if (typeof ppuAny.isHBlank === 'function') hblank = !!ppuAny.isHBlank();
       } catch { /* noop */ }
+      // Auto-HVBJOY fallback: if enabled and we keep reading, toggle an internal VBlank bit periodically
+      if (this.autoHvbOnReads) {
+        this.autoHvbReadCounter++;
+        if (this.autoHvbReadCounter >= this.autoHvbThresholdReads) {
+          this.autoHvbVBlankState ^= 1;
+          this.autoHvbReadCounter = 0;
+        }
+        vblank = this.autoHvbVBlankState ? true : false;
+      }
       const v = (vblank ? 0x80 : 0x00) | (hblank ? 0x40 : 0x00);
       if (shouldLog) {
         // eslint-disable-next-line no-console
@@ -692,12 +810,61 @@ export class SNESBus implements IMemoryBus {
       this.logCount++;
     }
 
+    // Targeted trace for trampoline selection/install writes used by cputest
+    try {
+      // @ts-ignore
+      const env = (globalThis as any).process?.env ?? {};
+      const enabled = env.TRACE_TRAMP === '1' || env.TRACE_TRAMP === 'true';
+      if (enabled && this.logCount < this.logLimit) {
+        const lp: any = (globalThis as any).__lastPC || {};
+        const pcInfo = this.logPc ? ` [PC=${((lp.PBR ?? 0) & 0xff).toString(16).padStart(2,'0')}:${((lp.PC ?? 0) & 0xffff).toString(16).padStart(4,'0')}]` : '';
+        // Watch 00:0201-0202 (opcode/id for indirect-long JML vector case)
+        if (bank === 0x00 && (off === 0x0201 || off === 0x0202)) {
+          console.log(`[TRAMP] W ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} <- ${value.toString(16).padStart(2,'0')}${pcInfo}`);
+          this.logCount++;
+        }
+        // Watch 7E:0000-0003 (opcode/id for absolute-long JML vector case)
+        if (bank === 0x7e && off >= 0x0000 && off <= 0x0003) {
+          console.log(`[TRAMP7E] W ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} <- ${value.toString(16).padStart(2,'0')}${pcInfo}`);
+          this.logCount++;
+        }
+        // Watch 7F:FEEC-FFEF (some test trampolines land here)
+        if (bank === 0x7f && off >= 0xfeec && off <= 0xffef) {
+          console.log(`[TRAMP7F] W ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} <- ${value.toString(16).padStart(2,'0')}${pcInfo}`);
+          this.logCount++;
+        }
+      }
+    } catch { /* noop */ }
+
     if (bank === 0x7e || bank === 0x7f) {
       this.wram[this.wramIndex(bank, off)] = value & 0xff;
       return;
     }
     // Low WRAM mirrors in banks 00-3F and 80-BF at $0000-$1FFF
     if (((bank <= 0x3f) || (bank >= 0x80 && bank <= 0xbf)) && off < 0x2000) {
+      // Optional DP watch: log writes to $0012/$0018/$0019 in bank0 mirrors for investigation
+      try {
+        // @ts-ignore
+        const env = (globalThis as any).process?.env ?? {};
+        if ((env.DP12_WATCH === '1') && (off === 0x0012 || off === 0x0013)) {
+          const lp: any = (globalThis as any).__lastPC || {};
+          const pcStr = `${((lp.PBR ?? 0) & 0xff).toString(16).padStart(2,'0')}:${((lp.PC ?? 0) & 0xffff).toString(16).padStart(4,'0')}`;
+          // eslint-disable-next-line no-console
+          console.log(`[DP12:WRITE] ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} <- ${value.toString(16).padStart(2,'0')} [PC=${pcStr}]`);
+        }
+        if (env.DP18_WATCH === '1' && (off === 0x0018 || off === 0x0019)) {
+          const lp: any = (globalThis as any).__lastPC || {};
+          const pcStr = `${((lp.PBR ?? 0) & 0xff).toString(16).padStart(2,'0')}:${((lp.PC ?? 0) & 0xffff).toString(16).padStart(4,'0')}`;
+          // eslint-disable-next-line no-console
+          console.log(`[DP18:WRITE] ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} <- ${value.toString(16).padStart(2,'0')} [PC=${pcStr}]`);
+        }
+        if (env.DP_WATCH_C2 === '1' && off === 0x00c2) {
+          const lp: any = (globalThis as any).__lastPC || {};
+          const pcStr = `${((lp.PBR ?? 0) & 0xff).toString(16).padStart(2,'0')}:${((lp.PC ?? 0) & 0xffff).toString(16).padStart(4,'0')}`;
+          // eslint-disable-next-line no-console
+          console.log(`[DP:C2:WRITE] ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} <- ${value.toString(16).padStart(2,'0')} [PC=${pcStr}]`);
+        }
+      } catch { /* noop */ }
       this.wram[off & 0x1fff] = value & 0xff;
       return;
     }
@@ -710,6 +877,33 @@ export class SNESBus implements IMemoryBus {
       //   console.log(`VRAM reg write: $21${reg.toString(16).padStart(2,'0')} = 0x${(value & 0xff).toString(16).padStart(2,'0')}`);
       // }
       this.ppu.writeReg(reg, value & 0xff);
+      return;
+    }
+
+    // WRAM data/address ports $2180-$2183
+    if (off === 0x2180) {
+      // Write data to WRAM at current address and increment
+      const idx = this.wramAddr & 0x1ffff;
+      this.wram[idx] = value & 0xff;
+      this.wramAddr = (this.wramAddr + 1) & 0x1ffff;
+      if (this.logMMIO && this.logCount < this.logLimit) {
+        const lp: any = (globalThis as any).__lastPC || {};
+        const pcInfo = this.logPc ? ` [PC=${((lp.PBR ?? 0) & 0xff).toString(16).padStart(2,'0')}:${((lp.PC ?? 0) & 0xffff).toString(16).padStart(4,'0')}]` : '';
+        console.log(`[MMIO] W ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} <- ${value.toString(16).padStart(2,'0')} (WRAM[${(idx).toString(16)}])${pcInfo}`);
+        this.logCount++;
+      }
+      return;
+    }
+    if (off === 0x2181) { // WMADDL
+      this.wramAddr = (this.wramAddr & ~0x00ff) | (value & 0xff);
+      return;
+    }
+    if (off === 0x2182) { // WMADDM
+      this.wramAddr = (this.wramAddr & ~0xff00) | ((value & 0xff) << 8);
+      return;
+    }
+    if (off === 0x2183) { // WMADDH (bit0 used for 128 KiB WRAM)
+      this.wramAddr = (this.wramAddr & ~0x10000) | ((value & 0x01) << 16);
       return;
     }
 
@@ -1020,6 +1214,38 @@ export class SNESBus implements IMemoryBus {
   // Minimal NMI enable query for scheduler
   public isNMIEnabled(): boolean {
     return (this.nmitimen & 0x80) !== 0;
+  }
+
+  // Instruction-based synthetic timing tick (CPU-only compare helper)
+  public tickInstr(count: number = 1): void {
+    if (!this.simTimingEnabled) return;
+    if (!this.simFrameStarted) {
+      this.ppu.startFrame();
+      this.simFrameStarted = true;
+      this.simInstrInScanline = 0;
+      this.ppu.hblank = false;
+    }
+    for (let i = 0; i < count; i++) {
+      this.simInstrInScanline++;
+      const visibleInstr = Math.max(0, this.simInstrPerScanline - this.simHBlankInstr);
+      // Visible portion
+      if (this.simInstrInScanline <= visibleInstr) {
+        this.ppu.hblank = false;
+      } else {
+        // HBlank portion
+        this.ppu.hblank = true;
+      }
+      // End of scanline
+      if (this.simInstrInScanline >= this.simInstrPerScanline) {
+        const prevScanline = this.ppu.scanline;
+        this.ppu.endScanline();
+        this.simInstrInScanline = 0;
+        // VBlank start: set RDNMI latch regardless of enable; scheduler would also deliver CPU NMI
+        if (prevScanline === 223 && this.ppu.scanline === 224) {
+          this.nmiOccurred = 1;
+        }
+      }
+    }
   }
 
   // Step the SPC700 stub by a scanline's worth of cycles

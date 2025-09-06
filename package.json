@@ -32,7 +32,13 @@
     "spc:render": "tsx scripts/spc_to_wav.ts",
     "web:dev": "vite web",
     "web:build": "vite build web",
-    "web:preview": "vite preview web"
+    "web:preview": "vite preview web",
+    "trace:setup:mame": "brew list mame >/dev/null 2>&1 || brew install mame",
+    "trace:setup:spc": "tsx scripts/gen_mame_spc_bios.ts",
+    "trace:cpu": "tsx scripts/trace_snes_mame.ts",
+    "trace:cpu:cputest": "npm run trace:cpu -- --rom=test-roms/snes-tests/cputest/cputest-full.sfc --secs=3 --out=artifacts/trace/cputest_full_mame.log",
+    "compare:mame": "tsx scripts/compare_against_mame.ts",
+    "compare:mame:cputest": "npm run compare:mame -- --rom=test-roms/snes-tests/cputest/cputest-full.sfc --trace=artifacts/trace/cputest_full_mame.log --max=50000"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^7.18.0",

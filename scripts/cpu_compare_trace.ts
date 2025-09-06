@@ -15,6 +15,7 @@ import fs from 'fs';
 import { Cartridge } from '../src/cart/cartridge.js';
 import { normaliseRom } from '../src/cart/loader.js';
 import { Emulator } from '../src/emulator/core.js';
+import { parseHeader } from '../src/cart/header.js';
 import { parseBsnesTraceFile, BsnesCpuTrace } from '../src/tools/bsnesTrace.js';
 
 function parseArgs(argv: string[]) {
@@ -79,7 +80,8 @@ async function main() {
 
   const romData = fs.readFileSync(romPath);
   const { rom } = normaliseRom(romData);
-  const cart = new Cartridge({ rom });
+  const header = parseHeader(rom);
+  const cart = new Cartridge({ rom, mapping: header.mapping });
   const emu = Emulator.fromCartridge(cart);
   emu.reset();
 
