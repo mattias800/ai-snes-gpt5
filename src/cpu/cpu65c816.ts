@@ -1458,8 +1458,6 @@ this.dbg(`[ADC abs,Y] m8=0 DBR=$${(effBank & 0xff).toString(16).padStart(2,'0')}
         }
         break;
       }
-        break;
-      }
       case 0xf5: { // SBC dp,X
         const dp = this.fetch8();
         const eff = this.effDPIndexed(dp, true);
