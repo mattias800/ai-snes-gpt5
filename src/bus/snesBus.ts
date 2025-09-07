@@ -10,6 +10,10 @@ export class SNESBus implements IMemoryBus {
   // 128 KiB WRAM at 0x7E:0000-0x7F:FFFF
   private wram = new Uint8Array(128 * 1024);
 
+  // Optional callback invoked at the start of VBlank (scanline 224)
+  // Used by cycle/instruction simulation modes to deliver CPU NMI without a full scheduler.
+  private onVBlankStart: (() => void) | null = null;
+
   // PPU device handling $2100-$21FF
   private ppu = new PPU();
 
@@ -115,12 +119,18 @@ export class SNESBus implements IMemoryBus {
   private smwHackCcReads = 0;
   private smwHackZeroReads = 0;
 
-  // Synthetic timing model for CPU-only runs (instruction-count based H/V timing)
+  // Synthetic timing model for CPU-only runs
+  // Mode A: instruction-count based (legacy)
   private simTimingEnabled = false;
   private simInstrPerScanline = 100;
   private simHBlankInstr = 12; // ~1/8 of scanline
   private simInstrInScanline = 0;
   private simFrameStarted = false;
+  // Mode B: cycle-count based
+  private simCycleMode = false;
+  private simCyclesPerScanline = 1364; // SNES master cycles per scanline (approx)
+  private simHBlankCycles = 256; // rough hblank length
+  private simCyclesInScanline = 0;
 
   // Optional SPC700 APU stub
   private spc: SPC700 | null = null;
@@ -172,10 +182,17 @@ export class SNESBus implements IMemoryBus {
       // - SNES_TIMING_HBLANK_FRAC sets hblank as 1/N of scanline (default 8)
       const sim = (env.SNES_TIMING_SIM ?? '0');
       this.simTimingEnabled = sim === '1' || sim.toLowerCase?.() === 'true';
+      // Enable cycle-based mode when SNES_TIMING_MODE=cycles
+      const simMode = (env.SNES_TIMING_MODE ?? '').toString().toLowerCase();
+      this.simCycleMode = simMode === 'cycles';
       const ips = Number(env.SNES_TIMING_IPS ?? '100');
       if (Number.isFinite(ips) && ips >= 1 && ips <= 100000) this.simInstrPerScanline = (ips|0);
       const hfrac = Number(env.SNES_TIMING_HBLANK_FRAC ?? '8');
       if (Number.isFinite(hfrac) && hfrac >= 2 && hfrac <= 1024) this.simHBlankInstr = Math.max(1, Math.floor(this.simInstrPerScanline / hfrac));
+      const cyc = Number(env.SNES_TIMING_CYCLES_PER_SCANLINE ?? '1364');
+      if (Number.isFinite(cyc) && cyc >= 100 && cyc <= 100000) this.simCyclesPerScanline = cyc|0;
+      const hcyc = Number(env.SNES_TIMING_HBLANK_CYCLES ?? '256');
+      if (Number.isFinite(hcyc) && hcyc >= 1 && hcyc <= 100000) this.simHBlankCycles = hcyc|0;
 
       // Optional: preset specific WRAM addresses via SNES_WRAM_PRESET="bb:aaaa:vv,7f002f:aa"
       const presetRaw = (env.SNES_WRAM_PRESET ?? '').toString();
@@ -842,6 +859,16 @@ export class SNESBus implements IMemoryBus {
     }
     // Low WRAM mirrors in banks 00-3F and 80-BF at $0000-$1FFF
     if (((bank <= 0x3f) || (bank >= 0x80 && bank <= 0xbf)) && off < 0x2000) {
+      // Optional stack write watch: logs writes to specific stack addresses (bank 00)
+      try {
+        const g: any = (globalThis as any);
+        const stkWatch: number[] = Array.isArray(g.__stackWatchAddrs) ? g.__stackWatchAddrs : [];
+        if ((bank & 0xff) === 0x00 && stkWatch.length > 0 && stkWatch.includes(off & 0xffff)) {
+          const lp: any = g.__lastPC || {};
+          const pcStr = `${((lp.PBR ?? 0) & 0xff).toString(16).padStart(2,'0')}:${((lp.PC ?? 0) & 0xffff).toString(16).padStart(4,'0')}`;
+          console.log(`[STKW] W ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} <- ${value.toString(16).padStart(2,'0')} [PC=${pcStr}]`);
+        }
+      } catch { /* noop */ }
       // Optional DP watch: log writes to $0012/$0018/$0019 in bank0 mirrors for investigation
       try {
         // @ts-ignore
@@ -857,6 +884,12 @@ export class SNESBus implements IMemoryBus {
           const pcStr = `${((lp.PBR ?? 0) & 0xff).toString(16).padStart(2,'0')}:${((lp.PC ?? 0) & 0xffff).toString(16).padStart(4,'0')}`;
           // eslint-disable-next-line no-console
           console.log(`[DP18:WRITE] ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} <- ${value.toString(16).padStart(2,'0')} [PC=${pcStr}]`);
+        }
+        if (env.DP21_WATCH === '1' && (off === 0x0021 || off === 0x0022)) {
+          const lp: any = (globalThis as any).__lastPC || {};
+          const pcStr = `${((lp.PBR ?? 0) & 0xff).toString(16).padStart(2,'0')}:${((lp.PC ?? 0) & 0xffff).toString(16).padStart(4,'0')}`;
+          // eslint-disable-next-line no-console
+          console.log(`[DP21:WRITE] ${bank.toString(16).padStart(2,'0')}:${off.toString(16).padStart(4,'0')} <- ${value.toString(16).padStart(2,'0')} [PC=${pcStr}]`);
         }
         if (env.DP_WATCH_C2 === '1' && off === 0x00c2) {
           const lp: any = (globalThis as any).__lastPC || {};
@@ -1216,9 +1249,15 @@ export class SNESBus implements IMemoryBus {
     return (this.nmitimen & 0x80) !== 0;
   }
 
+  // Allow emulator to register a callback for VBlank start (scanline 224)
+  public setVBlankCallback(cb: (() => void) | null): void {
+    this.onVBlankStart = cb ?? null;
+  }
+
   // Instruction-based synthetic timing tick (CPU-only compare helper)
   public tickInstr(count: number = 1): void {
     if (!this.simTimingEnabled) return;
+    if (this.simCycleMode) { this.tickCycles(count); return; }
     if (!this.simFrameStarted) {
       this.ppu.startFrame();
       this.simFrameStarted = true;
@@ -1243,6 +1282,34 @@ export class SNESBus implements IMemoryBus {
         // VBlank start: set RDNMI latch regardless of enable; scheduler would also deliver CPU NMI
         if (prevScanline === 223 && this.ppu.scanline === 224) {
           this.nmiOccurred = 1;
+          try { if (this.onVBlankStart) this.onVBlankStart(); } catch { /* noop */ }
+        }
+      }
+    }
+  }
+
+  // Cycle-based synthetic timing
+  public tickCycles(count: number = 1): void {
+    if (!this.simTimingEnabled) return;
+    if (!this.simFrameStarted) {
+      this.ppu.startFrame();
+      this.simFrameStarted = true;
+      this.simCyclesInScanline = 0;
+      this.ppu.hblank = false;
+    }
+    let c = Math.max(0, count|0);
+    while (c-- > 0) {
+      this.simCyclesInScanline++;
+      const visible = Math.max(0, this.simCyclesPerScanline - this.simHBlankCycles);
+      this.ppu.hblank = this.simCyclesInScanline > visible;
+      if (this.simCyclesInScanline >= this.simCyclesPerScanline) {
+        const prevScanline = this.ppu.scanline;
+        this.ppu.endScanline();
+        this.simCyclesInScanline = 0;
+        if (prevScanline === 223 && this.ppu.scanline === 224) {
+          // Latch NMI and invoke optional callback for delivery
+          this.nmiOccurred = 1;
+          try { if (this.onVBlankStart) this.onVBlankStart(); } catch { /* noop */ }
         }
       }
     }
