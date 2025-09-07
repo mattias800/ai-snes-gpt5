@@ -1,6 +1,7 @@
 import { CPU65C816 } from '../cpu/cpu65c816';
 import { SNESBus } from '../bus/snesBus';
 import { Cartridge } from '../cart/cartridge';
+import { MasterClock } from './masterClock';
 
 export class Emulator {
   constructor(public readonly bus: SNESBus, public readonly cpu: CPU65C816) {}
@@ -32,6 +33,11 @@ export class Emulator {
   }
   stepInstruction(): void {
     this.cpu.stepInstruction();
+  }
+  // Optional: run one frame using the master clock scaffold (accuracy mode placeholder)
+  stepFrameAccurate(): void {
+    const clk = new MasterClock((cycles: number) => (this.bus as any).tickCycles?.(cycles));
+    clk.runFrame();
   }
 }
 

@@ -10,6 +10,9 @@ export class SNESBus implements IMemoryBus {
   // 128 KiB WRAM at 0x7E:0000-0x7F:FFFF
   private wram = new Uint8Array(128 * 1024);
 
+  // Open-bus last value (tracks last data placed on the data bus)
+  private lastBusVal: number = 0x00;
+
   // Optional callback invoked at the start of VBlank (scanline 224)
   // Used by cycle/instruction simulation modes to deliver CPU NMI without a full scheduler.
   private onVBlankStart: (() => void) | null = null;
@@ -66,8 +69,13 @@ export class SNESBus implements IMemoryBus {
   private apuBusyReadCount = 0;
 
   // CPU I/O registers we model minimally
-  private nmitimen = 0; // $4200 (bit7 enables NMI)
+  private nmitimen = 0; // $4200 (bit7 enables NMI, bit0 enables auto-joypad read)
   private nmiOccurred = 0; // latched NMI flag for $4210 bit7
+
+  // Auto-joypad latch ($4218-$421f) — we model controller 1 only for now
+  private joy1l = 0x00; // $4218
+  private joy1h = 0x00; // $4219
+  private joyAutoLatched = false; // latched this frame
   // Optional auto-NMI fallback when running CPU-only comparisons without scheduler timing
   private autoNmiOnRdnmiReads = false;
   private autoNmiThresholdReads = 2;
@@ -713,6 +721,15 @@ export class SNESBus implements IMemoryBus {
       return v;
     }
 
+    // Auto-joypad reads $4218-$421f (we model only $4218/$4219 for controller 1)
+    if (off >= 0x4218 && off <= 0x421f) {
+      let v = 0x00;
+      if (off === 0x4218) v = this.joy1l & 0xff;
+      else if (off === 0x4219) v = this.joy1h & 0xff;
+      // reading auto-joy does not clear the latch; hardware keeps until next auto-read
+      return v & 0xff;
+    }
+
     // APU/io ranges not implemented for read
 
     // Controller ports $4016/$4017 (we only model $4016 bit0)
@@ -736,8 +753,8 @@ export class SNESBus implements IMemoryBus {
       return this.cart.rom[romAddr % this.cart.rom.length];
     }
 
-    // Default open bus 0x00
-    return 0x00;
+    // Default open bus: return last bus value
+    return this.lastBusVal & 0xff;
   }
 
   private performMDMA(mask: Byte): void {
@@ -818,6 +835,7 @@ export class SNESBus implements IMemoryBus {
   private mapWrite(addr: number, value: Byte): void {
     const bank = (addr >>> 16) & 0xff;
     const off = addr & 0xffff;
+    this.lastBusVal = value & 0xff;
 
     // Optional MMIO logging for $2100-$21FF and $4200-$421F and $4016
     const isPPU = (off & 0xff00) === 0x2100;
@@ -1180,6 +1198,8 @@ export class SNESBus implements IMemoryBus {
     // NMITIMEN $4200
     if (off === 0x4200) {
       this.nmitimen = value & 0xff;
+      // Clear auto-joy latch state when toggling
+      this.joyAutoLatched = false;
       return;
     }
 
@@ -1228,13 +1248,15 @@ export class SNESBus implements IMemoryBus {
   }
 
   read8(addr: number): Byte {
-    return this.mapRead(addr & 0xffffff);
+    const v = this.mapRead(addr & 0xffffff) & 0xff;
+    this.lastBusVal = v;
+    return v;
   }
 
   read16(addr: number): Word {
     const a = addr & 0xffffff;
-    const lo = this.read8(a);
-    const hi = this.read8((a + 1) & 0xffffff);
+    const lo = this.read8(a) & 0xff;
+    const hi = this.read8((a + 1) & 0xffffff) & 0xff;
     return (hi << 8) | lo;
   }
 
@@ -1299,6 +1321,8 @@ export class SNESBus implements IMemoryBus {
         // VBlank start: set RDNMI latch regardless of enable; scheduler would also deliver CPU NMI
         if (prevScanline === 223 && this.ppu.scanline === 224) {
           this.nmiOccurred = 1;
+          // Auto-joypad latch when enabled
+          if ((this.nmitimen & 0x01) !== 0) this.autoJoypadRead();
           try { if (this.onVBlankStart) this.onVBlankStart(); } catch { /* noop */ }
         }
         // Step APU per scanline in sim timing modes (mirror scheduler behavior)
@@ -1308,6 +1332,25 @@ export class SNESBus implements IMemoryBus {
         } catch { /* noop */ }
       }
     }
+  }
+
+  // Perform auto-joypad latch at VBlank start when enabled ($4200 bit0)
+  private autoJoypadRead(): void {
+    // Only latch once per frame
+    if (this.joyAutoLatched) return;
+    this.joyAutoLatched = true;
+    try {
+      // Reset controller shift: strobe high then low
+      this.controller1.writeStrobe(1);
+      this.controller1.writeStrobe(0);
+      let v = 0;
+      for (let i = 0; i < 16; i++) {
+        const bit = (this.controller1.readBit() & 1) ? 1 : 0;
+        v |= (bit << i);
+      }
+      this.joy1l = v & 0xff;
+      this.joy1h = (v >>> 8) & 0xff;
+    } catch { /* noop */ }
   }
 
   // Cycle-based synthetic timing
@@ -1344,9 +1387,11 @@ export class SNESBus implements IMemoryBus {
         if (prevScanline === 223 && this.ppu.scanline === 224) {
           // Latch NMI and invoke optional callback for delivery
           this.nmiOccurred = 1;
+          // Auto-joypad latch when enabled
+          if ((this.nmitimen & 0x01) !== 0) this.autoJoypadRead();
           try { if (this.onVBlankStart) this.onVBlankStart(); } catch { /* noop */ }
         }
-        // Step APU per scanline in sim timing modes
+        // Step APU per scanline in sim timing modes (mirror scheduler behavior)
         try {
           const busAny = this as any;
           if (typeof busAny.stepApuScanline === 'function') busAny.stepApuScanline();
