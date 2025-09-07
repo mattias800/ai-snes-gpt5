@@ -32,6 +32,10 @@ export const enum Flag {
 
 export class CPU65C816 {
   constructor(private bus: IMemoryBus) {}
+  // Execution context for debug: last fetched opcode and its PC
+  private ctxPrevPBR: number = 0;
+  private ctxPrevPC: number = 0;
+  private ctxOpcode: number = 0;
 
   // Debug: stack op logging and call-stack tracking (enabled via CPU_STACK_LOG=1)
   private get stackLogEnabled(): boolean {
@@ -64,6 +68,98 @@ export class CPU65C816 {
     }
   }
   private dbg(...args: any[]): void { if (this.debugEnabled) { try { console.log(...args); } catch { /* noop */ } } }
+
+  // Micro-ticking: when enabled via CPU_MICRO_TICK=1, each memory access will tick the bus
+  // by a heuristic number of cycles depending on address region (WRAM/ROM/IO). This prepares
+  // for a master-cycle scheduler without changing instruction logic yet.
+  private get microTickEnabled(): boolean {
+    try {
+      // @ts-ignore
+      const env = (globalThis as any).process?.env ?? {};
+      return env.CPU_MICRO_TICK === '1' || env.CPU_MICRO_TICK === 'true';
+    } catch { return false; }
+  }
+  private accessCycles(bank: number, addr: number, isWrite: boolean): number {
+    // More granular heuristic costs (in SNES master cycles) — tunable via env
+    // These are placeholders for a future accurate model; defaults are conservative.
+    const env = (globalThis as any).process?.env ?? {};
+    const romC = Number(env.CPU_ROM_CYC ?? '6') | 0;      // ROM fetch/data
+    const wramC = Number(env.CPU_WRAM_CYC ?? '6') | 0;    // WRAM general
+    const ioC = Number(env.CPU_IO_CYC ?? '6') | 0;        // PPU/CPU MMIO
+    const dpC = Number(env.CPU_DP_CYC ?? wramC) | 0;      // Direct page
+    const stkC = Number(env.CPU_STACK_CYC ?? wramC) | 0;  // Stack page
+    const b = bank & 0xff; const off = addr & 0xffff;
+    // WRAM banks $7E/$7F
+    if (b === 0x7e || b === 0x7f) return Math.max(1, wramC);
+    // Low WRAM mirrors $0000-$1FFF in banks 00-3F and 80-BF
+    if ((((b <= 0x3f) || (b >= 0x80 && b <= 0xbf))) && off < 0x2000) {
+      // Distinguish DP and stack regions for rough timing shaping
+      if (off <= 0x00ff) return Math.max(1, dpC);
+      if (off >= 0x0100 && off <= 0x01ff) return Math.max(1, stkC);
+      return Math.max(1, wramC);
+    }
+    // PPU MMIO $2100-$21FF or CPU/APU IO $4200-$421F/$4016-$4017
+    if ((off >= 0x2100 && off <= 0x21ff) || (off >= 0x4200 && off <= 0x421f) || off === 0x4016 || off === 0x4017) return Math.max(1, ioC);
+    // Otherwise assume ROM region
+    return Math.max(1, romC);
+  }
+  private tickAccess(bank: number, addr: number, isWrite: boolean): void {
+    if (!this.microTickEnabled) return;
+    try {
+      const busAny: any = this.bus as any;
+      if (typeof busAny.tickCycles === 'function') {
+        const c = this.accessCycles(bank, addr, isWrite);
+        busAny.tickCycles(c);
+      }
+    } catch { /* noop */ }
+  }
+  private tickInternal(cycles: number): void {
+    if (!this.microTickEnabled) return;
+    try {
+      const busAny: any = this.bus as any;
+      if (typeof busAny.tickCycles === 'function') {
+        const c = Math.max(0, cycles|0);
+        if (c > 0) busAny.tickCycles(c);
+      }
+    } catch { /* noop */ }
+  }
+
+  // Optional focused dp[$21] probe: when enabled via CPU_DP21_PROBE=1, the CPU will publish
+  // per-instruction events for DEC dp ($21) and STA dp ($21) capturing pre/post values and flags.
+  private get dp21ProbeEnabled(): boolean {
+    try {
+      // @ts-ignore
+      const env = (globalThis as any).process?.env ?? {};
+      return env.CPU_DP21_PROBE === '1' || env.CPU_DP21_PROBE === 'true';
+    } catch { return false; }
+  }
+  private pushDp21Event(ev: any): void {
+    if (!this.dp21ProbeEnabled) return;
+    try {
+      const g: any = globalThis as any;
+      g.__dp21Ring = g.__dp21Ring || [];
+      g.__dp21Ring.push(ev);
+      if (g.__dp21Ring.length > 256) g.__dp21Ring.shift();
+    } catch { /* noop */ }
+  }
+
+  // Optional branch probe: when enabled via CPU_BRANCH_PROBE=1, publish BEQ/BNE events
+  private get branchProbeEnabled(): boolean {
+    try {
+      // @ts-ignore
+      const env = (globalThis as any).process?.env ?? {};
+      return env.CPU_BRANCH_PROBE === '1' || env.CPU_BRANCH_PROBE === 'true';
+    } catch { return false; }
+  }
+  private pushBranchEvent(ev: any): void {
+    if (!this.branchProbeEnabled) return;
+    try {
+      const g: any = globalThis as any;
+      g.__brRing = g.__brRing || [];
+      g.__brRing.push(ev);
+      if (g.__brRing.length > 256) g.__brRing.shift();
+    } catch { /* noop */ }
+  }
 
   // CPU low-power states
   private waitingForInterrupt = false;
@@ -110,7 +206,9 @@ export class CPU65C816 {
 
   private read8(bank: Byte, addr: Word): Byte {
     const a = ((bank << 16) | addr) >>> 0;
-    return this.bus.read8(a);
+    const v = this.bus.read8(a);
+    this.tickAccess(bank & 0xff, addr & 0xffff, false);
+    return v;
   }
 
   private read16(bank: Byte, addr: Word): Word {
@@ -141,7 +239,26 @@ export class CPU65C816 {
 
   private write8(bank: Byte, addr: Word, value: Byte): void {
     const a = ((bank << 16) | addr) >>> 0;
+    // Stack return watch: if compare tool asked us to watch specific stack addresses, report any writes
+    try {
+      const g: any = (globalThis as any);
+      const watch: number[] = Array.isArray(g.__stackWatchAddrs) ? g.__stackWatchAddrs : [];
+      // Only watch bank 0 writes
+      if ((bank & 0xff) === 0x00 && watch.length > 0) {
+        const abs = addr & 0xffff;
+        if (watch.includes(abs)) {
+          const pcNow = this.state.PC & 0xffff;
+          const pbrNow = this.state.PBR & 0xff;
+          const pcPrev = this.ctxPrevPC & 0xffff;
+          const pbrPrev = this.ctxPrevPBR & 0xff;
+          const opPrev = this.ctxOpcode & 0xff;
+          // eslint-disable-next-line no-console
+          console.log(`[STACK-WATCH] write @00:${abs.toString(16).padStart(4,'0')} <= ${((value & 0xff)>>>0).toString(16).padStart(2,'0')} (PC=${pcNow.toString(16).padStart(4,'0')} PBR=${pbrNow.toString(16).padStart(2,'0')} prev=${pbrPrev.toString(16).padStart(2,'0')}:${pcPrev.toString(16).padStart(4,'0')} OP=${opPrev.toString(16).padStart(2,'0')})`);
+        }
+      }
+    } catch { /* noop */ }
     this.bus.write8(a, value & 0xff);
+    this.tickAccess(bank & 0xff, addr & 0xffff, true);
   }
 
   private write16Cross(bank: Byte, addr: Word, value: Word): void {
@@ -453,6 +570,18 @@ export class CPU65C816 {
     // Stack page is 0x0100 in emulation; full 16-bit S in native. Stack always in bank 0.
     const sBefore = this.state.S & 0xffff;
     const spAddr: Word = this.state.E ? ((0x0100 | (this.state.S & 0xff)) & 0xffff) : (this.state.S & 0xffff);
+    // Optional focused push trace around 00:8100..00:81FF
+    try {
+      // @ts-ignore
+      const env = (globalThis as any).process?.env ?? {};
+      if (env.CPU_PUSH_TRACE === '1' || env.CPU_PUSH_TRACE === 'true') {
+        const inWin = (this.ctxPrevPBR & 0xff) === 0x00 && (this.ctxPrevPC & 0xffff) >= 0x8100 && (this.ctxPrevPC & 0xffff) <= 0x81ff;
+        if (inWin) {
+          // eslint-disable-next-line no-console
+          console.log(`[PUSH8] PC=${(this.ctxPrevPBR&0xff).toString(16).padStart(2,'0')}:${(this.ctxPrevPC&0xffff).toString(16).padStart(4,'0')} OP=${(this.ctxOpcode&0xff).toString(16).padStart(2,'0')} S_before=${sBefore.toString(16).padStart(4,'0')} -> W 00:${(spAddr&0xffff).toString(16).padStart(4,'0')} <= ${((v&0xff)>>>0).toString(16).padStart(2,'0')}`);
+        }
+      }
+    } catch { /* noop */ }
     this.write8(0x00, spAddr as Word, v);
     if (this.state.E) {
       this.state.S = ((this.state.S - 1) & 0xff) | 0x0100;
@@ -618,6 +747,19 @@ export class CPU65C816 {
 
   // BCD helpers for ADC/SBC when Decimal mode (Flag.D) is set
   private adcBCD(value: number): void {
+    // Optional focused decimal trace (CPU_DEC_TRACE=1) limited to bank 00 and PC 0x8100..0x818F
+    const decTraceEnabled = (() => {
+      try {
+        // @ts-ignore
+        const env = (globalThis as any).process?.env ?? {};
+        return env.CPU_DEC_TRACE === '1' || env.CPU_DEC_TRACE === 'true';
+      } catch { return false; }
+    })();
+    const lastPc = (() => {
+      try { const g: any = globalThis as any; return g.__lastPC ? { PBR: g.__lastPC.PBR|0, PC: g.__lastPC.PC|0 } : { PBR: this.state.PBR & 0xff, PC: (this.state.PC - 1) & 0xffff }; } catch { return { PBR: this.state.PBR & 0xff, PC: (this.state.PC - 1) & 0xffff }; }
+    })();
+    const inFocusWin = (lastPc.PBR & 0xff) === 0x00 && (lastPc.PC & 0xffff) >= 0x8100 && (lastPc.PC & 0xffff) <= 0x83ff;
+
     if (this.m8) {
       // 8-bit packed BCD addition (two nibbles)
       const a = this.state.A & 0xff;
@@ -647,21 +789,29 @@ export class CPU65C816 {
       if (vflag) this.state.P |= Flag.V; else this.state.P &= ~Flag.V;
       this.state.A = (this.state.A & 0xff00) | res;
       this.setZNFromValue(res, 8);
+
+      if (decTraceEnabled && inFocusWin) {
+        try {
+          // eslint-disable-next-line no-console
+          console.log(`[DEC-ADC] ${lastPc.PBR.toString(16).padStart(2,'0')}:${lastPc.PC.toString(16).padStart(4,'0')} m8=1 D=${(this.state.P & Flag.D)?1:0} Cin=${carryIn} A_pre=${a.toString(16).padStart(2,'0')} B=${b.toString(16).padStart(2,'0')} rbin=${rbin.toString(16).padStart(2,'0')} Res=${res.toString(16).padStart(2,'0')} Cout=${carry} P=${(this.state.P&0xff).toString(16).padStart(2,'0')}`);
+        } catch { /* noop */ }
+      }
     } else {
       // 16-bit packed BCD addition (four nibbles)
       const a = this.state.A & 0xffff;
       const b = value & 0xffff;
       const carryIn = (this.state.P & Flag.C) ? 1 : 0;
 
-      // Perform BCD adjustment across nibbles and capture the raw sum of the most-significant nibble
+      // Binary pre-adjust sum for V flag per 65C816 rule
+      const rbin = (a + b + carryIn) & 0xffff;
+
+      // Perform BCD adjustment across nibbles
       let carry = carryIn;
       let res = 0;
-      let msNibbleRawSum = 0; // raw (pre-adjust) sum for bits 12..15 including BCD carry from lower nibbles
       for (let shift = 0; shift <= 12; shift += 4) {
         const an = (a >>> shift) & 0x0f;
         const bn = (b >>> shift) & 0x0f;
         let s = an + bn + carry;
-        if (shift === 12) msNibbleRawSum = s & 0x0f; // keep only 4-bit raw sum for overflow test
         if (s > 9) s += 6;
         carry = s > 0x0f ? 1 : 0;
         const d = s & 0x0f;
@@ -670,17 +820,35 @@ export class CPU65C816 {
       res &= 0xffff;
       // Set C from final BCD carry; Z/N from adjusted result
       if (carry) this.state.P |= Flag.C; else this.state.P &= ~Flag.C;
-      // Overflow flag for decimal add: binary overflow of top nibble using BCD carry from lower nibbles
-      const aTop = (a >>> 12) & 0x0f;
-      const bTop = (b >>> 12) & 0x0f;
-      const vflag = (~(aTop ^ bTop) & (aTop ^ msNibbleRawSum) & 0x08) !== 0;
+      // Overflow flag for decimal add: compute from binary pre-adjust rbin (not adjusted)
+      const vflag = (~(a ^ b) & (a ^ rbin) & 0x8000) !== 0;
       if (vflag) this.state.P |= Flag.V; else this.state.P &= ~Flag.V;
       this.state.A = res;
       this.setZNFromValue(res, 16);
+
+      if (decTraceEnabled && inFocusWin) {
+        try {
+          // eslint-disable-next-line no-console
+          console.log(`[DEC-ADC] ${lastPc.PBR.toString(16).padStart(2,'0')}:${lastPc.PC.toString(16).padStart(4,'0')} m8=0 D=${(this.state.P & Flag.D)?1:0} Cin=${carryIn} A_pre=${a.toString(16).padStart(4,'0')} B=${b.toString(16).padStart(4,'0')} rbin=${rbin.toString(16).padStart(4,'0')} Res=${res.toString(16).padStart(4,'0')} Cout=${carry} P=${(this.state.P&0xff).toString(16).padStart(2,'0')}`);
+        } catch { /* noop */ }
+      }
     }
   }
 
   private sbcBCD(value: number): void {
+    // Optional focused decimal trace (CPU_DEC_TRACE=1) limited to bank 00 and PC 0x8100..0x818F
+    const decTraceEnabled = (() => {
+      try {
+        // @ts-ignore
+        const env = (globalThis as any).process?.env ?? {};
+        return env.CPU_DEC_TRACE === '1' || env.CPU_DEC_TRACE === 'true';
+      } catch { return false; }
+    })();
+    const lastPc = (() => {
+      try { const g: any = globalThis as any; return g.__lastPC ? { PBR: g.__lastPC.PBR|0, PC: g.__lastPC.PC|0 } : { PBR: this.state.PBR & 0xff, PC: (this.state.PC - 1) & 0xffff }; } catch { return { PBR: this.state.PBR & 0xff, PC: (this.state.PC - 1) & 0xffff }; }
+    })();
+    const inFocusWin = (lastPc.PBR & 0xff) === 0x00 && (lastPc.PC & 0xffff) >= 0x8100 && (lastPc.PC & 0xffff) <= 0x83ff;
+
     if (this.m8) {
       const a = this.state.A & 0xff;
       const b = value & 0xff;
@@ -698,6 +866,13 @@ export class CPU65C816 {
       const res = r & 0xff;
       this.state.A = (this.state.A & 0xff00) | res;
       this.setZNFromValue(res, 8);
+
+      if (decTraceEnabled && inFocusWin) {
+        try {
+          // eslint-disable-next-line no-console
+          console.log(`[DEC-SBC] ${lastPc.PBR.toString(16).padStart(2,'0')}:${lastPc.PC.toString(16).padStart(4,'0')} m8=1 D=${(this.state.P & Flag.D)?1:0} Cin=${c} A_pre=${a.toString(16).padStart(2,'0')} B=${b.toString(16).padStart(2,'0')} rbin=${resBin.toString(16).padStart(2,'0')} Res=${res.toString(16).padStart(2,'0')} Cout=${carry} P=${(this.state.P&0xff).toString(16).padStart(2,'0')}`);
+        } catch { /* noop */ }
+      }
     } else {
       const a = this.state.A & 0xffff;
       const b = value & 0xffff;
@@ -729,6 +904,13 @@ export class CPU65C816 {
       if (carry) this.state.P |= Flag.C; else this.state.P &= ~Flag.C;
       this.state.A = res;
       this.setZNFromValue(res, 16);
+
+      if (decTraceEnabled && inFocusWin) {
+        try {
+          // eslint-disable-next-line no-console
+          console.log(`[DEC-SBC] ${lastPc.PBR.toString(16).padStart(2,'0')}:${lastPc.PC.toString(16).padStart(4,'0')} m8=0 D=${(this.state.P & Flag.D)?1:0} Cin=${c} A_pre=${a.toString(16).padStart(4,'0')} B=${b.toString(16).padStart(4,'0')} rbin=${resBin.toString(16).padStart(4,'0')} Res=${res.toString(16).padStart(4,'0')} Cout=${carry} P=${(this.state.P&0xff).toString(16).padStart(2,'0')}`);
+        } catch { /* noop */ }
+      }
     }
   }
 
@@ -854,7 +1036,79 @@ export class CPU65C816 {
       g.__lastA = { A8: this.state.A & 0xff, A16: this.state.A & 0xffff };
     } catch { void 0; }
     const opcode = this.fetch8();
+    // Save context for push tracing
+    this.ctxPrevPBR = prevPBR & 0xff;
+    this.ctxPrevPC = prevPC & 0xffff;
+    this.ctxOpcode = opcode & 0xff;
+    // Optional micro-trace around 80F1/80F7/80F9 and key 81xx ops for 816X diagnosis
+    try {
+      // @ts-ignore
+      const env = (globalThis as any).process?.env ?? {};
+      const micro = (env.CPU_MICRO_816X === '1' || env.CPU_MICRO_816X === 'true');
+      if (micro && prevPBR === 0x00) {
+        const pc16 = prevPC & 0xffff;
+        const op = opcode & 0xff;
+        const P = this.state.P & 0xff;
+        const m = (P & Flag.M) ? 1 : (this.state.E ? 1 : 0);
+        const xw = (P & Flag.X) ? 1 : (this.state.E ? 1 : 0);
+        const dp21 = this.read8(0x00, 0x0021 as Word) & 0xff;
+        const baseInfo = `P=$${P.toString(16).padStart(2,'0')} E=${this.state.E?1:0} M=${m?1:0} X=${xw?1:0} A=$${(this.state.A&0xffff).toString(16).padStart(4,'0')} Xr=$${(this.state.X&0xffff).toString(16).padStart(4,'0')} Yr=$${(this.state.Y&0xffff).toString(16).padStart(4,'0')} S=$${(this.state.S&0xffff).toString(16).padStart(4,'0')} D=$${(this.state.D&0xffff).toString(16).padStart(4,'0')} DBR=$${(this.state.DBR&0xff).toString(16).padStart(2,'0')} dp21=$${dp21.toString(16).padStart(2,'0')}`;
+        let extra = '';
+        if (pc16 === 0x80f1 && op === 0x85) {
+          const dp = this.read8(prevPBR as Byte, ((prevPC + 1) & 0xffff) as Word) & 0xff;
+          const pageBase = this.state.E ? 0x0000 : (this.state.D & 0xff00);
+          const eff = (pageBase | dp) & 0xffff;
+          extra = ` [STA dp dp=$${dp.toString(16).padStart(2,'0')} eff=$${eff.toString(16).padStart(4,'0')} Aval=$${(this.state.A&0xff).toString(16).padStart(2,'0')}]`;
+        } else if (pc16 === 0x80f7 && op === 0xb5) {
+          const dp = this.read8(prevPBR as Byte, ((prevPC + 1) & 0xffff) as Word) & 0xff;
+          const D = this.state.D & 0xffff; const xLow = this.state.X & 0xff;
+          const pageBase = this.state.E ? 0x0000 : (D & 0xff00);
+          const off = (dp + xLow) & 0xff;
+          const eff = (pageBase | off) & 0xffff;
+          const val = this.read8(0x00, eff as Word) & 0xff;
+          extra = ` [LDA dp,X dp=$${dp.toString(16).padStart(2,'0')} eff=$${eff.toString(16).padStart(4,'0')} val=$${val.toString(16).padStart(2,'0')}]`;
+        } else if (pc16 === 0x80f9 && (op === 0xf0 || op === 0xd0)) {
+          const off = (this.read8(prevPBR as Byte, ((prevPC + 1) & 0xffff) as Word) << 24) >> 24;
+          const z = (P & Flag.Z) ? 1 : 0;
+          const fall = ((prevPC + 2) & 0xffff);
+          const targ = (fall + off) & 0xffff;
+          extra = ` [BR${op===0xf0?'EQ':'NE'} Z=${z} off=${off} fall=$${fall.toString(16).padStart(4,'0')} targ=$${targ.toString(16).padStart(4,'0')}]`;
+        } else if (pc16 === 0x8160 && op === 0xc6) {
+          const pred = (dp21 - 1) & 0xff;
+          extra = ` [DEC $21 pred=$${pred.toString(16).padStart(2,'0')}]`;
+        } else if (pc16 === 0x8162 && (op === 0xd0 || op === 0xf0)) {
+          const off = (this.read8(prevPBR as Byte, ((prevPC + 1) & 0xffff) as Word) << 24) >> 24;
+          const z = (P & Flag.Z) ? 1 : 0;
+          const fall = ((prevPC + 2) & 0xffff);
+          const targ = (fall + off) & 0xffff;
+          extra = ` [BR${op===0xf0?'EQ':'NE'} Z=${z} off=${off} fall=$${fall.toString(16).padStart(4,'0')} targ=$${targ.toString(16).padStart(4,'0')}]`;
+        } else if (pc16 === 0x8167 && op === 0xa9) {
+          const imm = this.read8(prevPBR as Byte, ((prevPC + 1) & 0xffff) as Word) & 0xff;
+          extra = ` [LDA #$${imm.toString(16).padStart(2,'0')}]`;
+        } else if (pc16 === 0x8169 && op === 0x85) {
+          const dp = this.read8(prevPBR as Byte, ((prevPC + 1) & 0xffff) as Word) & 0xff;
+          const pageBase = this.state.E ? 0x0000 : (this.state.D & 0xff00);
+          const eff = (pageBase | dp) & 0xffff;
+          extra = ` [STA dp dp=$${dp.toString(16).padStart(2,'0')} eff=$${eff.toString(16).padStart(4,'0')}]`;
+        } else if (pc16 === 0x8196 && op === 0x20) {
+          extra = ` [JSR $8196]`;
+        } else if (pc16 === 0x8199 && (op === 0xa2 || op === 0xa9)) {
+          extra = ` [IMM load]`;
+        }
+        // eslint-disable-next-line no-console
+        if (extra) console.log(`[CPU:MICRO] at 00:${prevPC.toString(16).padStart(4,'0')} OP=$${op.toString(16).padStart(2,'0')} ${baseInfo}${extra}`);
+      }
+    } catch { /* noop */ }
     const prevXFlag = (this.state.P & Flag.X) !== 0;
+    try {
+      // @ts-ignore
+      const env = (globalThis as any).process?.env ?? {};
+      if ((env.CPU_PROBE_8160 === '1' || env.CPU_PROBE_8160 === 'true') && prevPBR === 0x00 && prevPC === 0x8160) {
+        const v = this.read8(0x00, 0x0021) & 0xff;
+        // eslint-disable-next-line no-console
+        console.log(`[CPU:PROBE8160] DP21=${v.toString(16).padStart(2,'0')}`);
+      }
+    } catch { /* noop */ }
     if (this.debugEnabled) {
       const pHex = (this.state.P & 0xff).toString(16).padStart(2, '0');
       this.dbg(`[CPU] E=${this.state.E ? 1 : 0} P=$${pHex} m8=${this.m8 ? 1 : 0} x8=${this.x8 ? 1 : 0} @ ${prevPBR.toString(16).padStart(2,'0')}:${prevPC.toString(16).padStart(4,'0')} OP=$${opcode.toString(16).padStart(2,'0')}`);
@@ -871,6 +1125,7 @@ export class CPU65C816 {
       g2.__lastIR.push({ PBR: prevPBR, PC: prevPC, OP: opcode & 0xff, A8: this.state.A & 0xff, A16: this.state.A & 0xffff });
       if (g2.__lastIR.length > 512) g2.__lastIR.shift();
     } catch { void 0; }
+    const opcodeCycles = this.cyclesForOpcode(opcode & 0xff);
     switch (opcode) {
       // NOP (in 65C816, 0xEA)
       case 0xea:
@@ -896,6 +1151,7 @@ export class CPU65C816 {
         }
         break;
       }
+
 
       // LDX #imm
       case 0xa2: {
@@ -2048,15 +2304,50 @@ this.write16(effBank, eff, m & 0xffff);
         const dp = this.fetch8();
         const eff = this.dpAddr(dp);
         if (this.m8) {
-          const m = (this.read8(0x00, eff) - 1) & 0xff;
+          const preM = this.read8(0x00, eff) & 0xff;
+          // Approximate internal modify timing before write
+          try {
+            const env = (globalThis as any).process?.env ?? {};
+            const rmwExtra = Number(env.CPU_RMW_EXTRA_CYC ?? '2') | 0;
+            this.tickInternal(rmwExtra);
+          } catch { /* noop */ }
+          const m = (preM - 1) & 0xff;
+          const P_pre = this.state.P & 0xff;
           this.writeDP8WithMirror(eff, m);
           this.setZNFromValue(m, 8);
+          if (this.dp21ProbeEnabled && ((dp & 0xff) === 0x21)) {
+            this.pushDp21Event({
+              kind: 'DEC', op: 0xc6, PBR: this.ctxPrevPBR & 0xff, PC: this.ctxPrevPC & 0xffff,
+              eff: eff & 0xffff, pre: preM & 0xff, post: m & 0xff,
+              P_pre, P_post: this.state.P & 0xff,
+              E: this.state.E ? 1 : 0,
+              M: (this.state.P & Flag.M) ? 1 : (this.state.E ? 1 : 0),
+              X: (this.state.P & Flag.X) ? 1 : (this.state.E ? 1 : 0),
+            });
+          }
         } else {
           const lo = this.read8(0x00, eff);
           const hi = this.read8(0x00, (eff + 1) & 0xffff);
-          const m = (((hi << 8) | lo) - 1) & 0xffff;
+          const preM16 = ((hi << 8) | lo) & 0xffff;
+          try {
+            const env = (globalThis as any).process?.env ?? {};
+            const rmwExtra = Number(env.CPU_RMW_EXTRA_CYC ?? '3') | 0;
+            this.tickInternal(rmwExtra);
+          } catch { /* noop */ }
+          const m = (preM16 - 1) & 0xffff;
+          const P_pre = this.state.P & 0xff;
           this.writeDP16WithMirror(eff, m & 0xffff);
           this.setZNFromValue(m, 16);
+          if (this.dp21ProbeEnabled && ((dp & 0xff) === 0x21)) {
+            this.pushDp21Event({
+              kind: 'DEC16', op: 0xc6, PBR: this.ctxPrevPBR & 0xff, PC: this.ctxPrevPC & 0xffff,
+              eff: eff & 0xffff, pre: preM16 & 0xffff, post: m & 0xffff,
+              P_pre, P_post: this.state.P & 0xff,
+              E: this.state.E ? 1 : 0,
+              M: (this.state.P & Flag.M) ? 1 : (this.state.E ? 1 : 0),
+              X: (this.state.P & Flag.X) ? 1 : (this.state.E ? 1 : 0),
+            });
+          }
         }
         break;
       }
@@ -2177,11 +2468,14 @@ this.write16(effBank, eff, m & 0xffff);
       case 0xf0: { // BEQ
         const off = this.fetch8() << 24 >> 24; // sign-extend
         const z = (this.state.P & Flag.Z) !== 0;
+        const fall = this.state.PC & 0xffff;
+        const targ = (fall + off) & 0xffff;
         if (this.debugEnabled) {
-          this.dbg(`[BEQ] Z=${z?1:0} off=${off} PC_pre=${this.state.PC.toString(16).padStart(4,'0')}`);
+          this.dbg(`[BEQ] Z=${z?1:0} off=${off} fall=${fall.toString(16).padStart(4,'0')}`);
         }
+        this.pushBranchEvent({ kind: 'BEQ', op: 0xf0, PBR: this.ctxPrevPBR & 0xff, PC: this.ctxPrevPC & 0xffff, off, Z: z ? 1 : 0, taken: z ? 1 : 0, fall, target: targ, P_pre: this.state.P & 0xff });
         if (z) {
-          this.state.PC = (this.state.PC + off) & 0xffff;
+          this.state.PC = targ;
           if (this.debugEnabled) this.dbg(`[BEQ] taken -> PC=${this.state.PC.toString(16).padStart(4,'0')}`);
         }
         break;
@@ -2189,11 +2483,14 @@ this.write16(effBank, eff, m & 0xffff);
       case 0xd0: { // BNE
         const off = this.fetch8() << 24 >> 24;
         const z = (this.state.P & Flag.Z) !== 0;
+        const fall = this.state.PC & 0xffff;
+        const targ = (fall + off) & 0xffff;
         if (this.debugEnabled) {
-          this.dbg(`[BNE] Z=${z?1:0} off=${off} PC_pre=${this.state.PC.toString(16).padStart(4,'0')}`);
+          this.dbg(`[BNE] Z=${z?1:0} off=${off} fall=${fall.toString(16).padStart(4,'0')}`);
         }
+        this.pushBranchEvent({ kind: 'BNE', op: 0xd0, PBR: this.ctxPrevPBR & 0xff, PC: this.ctxPrevPC & 0xffff, off, Z: z ? 1 : 0, taken: !z ? 1 : 0, fall, target: targ, P_pre: this.state.P & 0xff });
         if (!z) {
-          this.state.PC = (this.state.PC + off) & 0xffff;
+          this.state.PC = targ;
           if (this.debugEnabled) this.dbg(`[BNE] taken -> PC=${this.state.PC.toString(16).padStart(4,'0')}`);
         }
         break;
@@ -2561,12 +2858,77 @@ this.write16(bank, eff, 0x0000);
         // Push (PC-1) high then low
         const ret = (this.state.PC - 1) & 0xffff;
         const fromPC = (this.state.PC - 3) & 0xffff; // opcode(1) + operand(2)
+        const sBefore = this.state.S & 0xffff;
+        // Optional focused instrumentation for 00:8196 JSR when enabled
+        try {
+          // @ts-ignore
+          const env = (globalThis as any).process?.env ?? {};
+          if ((env.CPU_JSR8196_TRACE === '1' || env.CPU_JSR8196_TRACE === 'true')) {
+            // prev PC is fromPC
+            if (((this.state.PBR & 0xff) === 0x00) && fromPC === 0x8196) {
+              // eslint-disable-next-line no-console
+              console.log(`[CPU:JSR8196] will push ret=${ret.toString(16).padStart(4,'0')} to 00:${sBefore.toString(16).padStart(4,'0')}(H),00:${((sBefore-1)&0xffff).toString(16).padStart(4,'0')}(L)`);
+              try { (globalThis as any).__stackWatchAddrs = [sBefore & 0xffff, (sBefore - 1) & 0xffff]; } catch { /* noop */ }
+            }
+          }
+          if ((env.CPU_JSR8127_TRACE === '1' || env.CPU_JSR8127_TRACE === 'true')) {
+            if (((this.state.PBR & 0xff) === 0x00) && fromPC === 0x8127) {
+              // eslint-disable-next-line no-console
+              console.log(`[CPU:JSR8127] will push ret=${ret.toString(16).padStart(4,'0')} to 00:${sBefore.toString(16).padStart(4,'0')}(H),00:${((sBefore-1)&0xffff).toString(16).padStart(4,'0')}(L)`);
+              try { (globalThis as any).__stackWatchAddrs = [sBefore & 0xffff, (sBefore - 1) & 0xffff]; } catch { /* noop */ }
+            }
+          }
+        } catch { /* noop */ }
         this.push8((ret >>> 8) & 0xff);
         this.push8(ret & 0xff);
         // Debug call frame
         if (this.stackLogEnabled) {
           this.callFrames.push({ type: 'JSR', fromPBR: this.state.PBR & 0xff, fromPC, toPBR: this.state.PBR & 0xff, toPC: target & 0xffff, sAtCall: this.state.S & 0xffff });
           this.recordStackEvent({ kind: 'evt', evt: 'JSR', fromPBR: this.state.PBR & 0xff, fromPC, toPBR: this.state.PBR & 0xff, toPC: target & 0xffff, S: this.state.S & 0xffff });
+          // Install stack write watch for the specific return bytes of JSR 00:8196
+          if (((this.state.PBR & 0xff) === 0x00) && fromPC === 0x8196) {
+            try {
+              const g: any = (globalThis as any);
+              const hiAddr = sBefore & 0xffff;
+              const loAddr = (sBefore - 1) & 0xffff;
+              g.__stackWatchAddrs = [hiAddr, loAddr];
+              this.recordStackEvent({ kind: 'evt', evt: 'WATCH_RET', addrs: [hiAddr, loAddr], ret });
+              try { console.log(`[JSRRET8196] ret=${ret.toString(16).padStart(4,'0')} hiAddr=${hiAddr.toString(16).padStart(4,'0')} loAddr=${loAddr.toString(16).padStart(4,'0')}`); } catch { /* noop */ }
+            } catch { /* noop */ }
+          }
+          // Install stack write watch for the specific return bytes of JSR 00:8127
+          if (((this.state.PBR & 0xff) === 0x00) && fromPC === 0x8127) {
+            try {
+              const g: any = (globalThis as any);
+              const hiAddr = sBefore & 0xffff;
+              const loAddr = (sBefore - 1) & 0xffff;
+              const watchAddrs = [
+                hiAddr,
+                loAddr,
+                ((hiAddr + 1) & 0xffff),
+                ((hiAddr + 2) & 0xffff),
+                ((loAddr - 1) & 0xffff),
+                ((loAddr - 2) & 0xffff),
+              ];
+              g.__stackWatchAddrs = watchAddrs;
+              this.recordStackEvent({ kind: 'evt', evt: 'WATCH_RET', addrs: watchAddrs, ret });
+              try {
+                console.log(`[JSRRET8127] ret=${ret.toString(16).padStart(4,'0')} hiAddr=${hiAddr.toString(16).padStart(4,'0')} loAddr=${loAddr.toString(16).padStart(4,'0')} extra=[${watchAddrs.map(a=>a.toString(16).padStart(4,'0')).join(',')}]`);
+              } catch { /* noop */ }
+            } catch { /* noop */ }
+          }
+          // Install stack write watch for the specific return bytes of JSR 00:816B
+          if (((this.state.PBR & 0xff) === 0x00) && fromPC === 0x816b) {
+            try {
+              const g: any = (globalThis as any);
+              const hiAddr = sBefore & 0xffff;
+              const loAddr = (sBefore - 1) & 0xffff;
+              const watchAddrs = [ hiAddr, loAddr, ((hiAddr + 1) & 0xffff), ((loAddr - 1) & 0xffff) ];
+              g.__stackWatchAddrs = watchAddrs;
+              this.recordStackEvent({ kind: 'evt', evt: 'WATCH_RET', addrs: watchAddrs, ret });
+              try { console.log(`[JSRRET816B] ret=${ret.toString(16).padStart(4,'0')} hiAddr=${hiAddr.toString(16).padStart(4,'0')} loAddr=${loAddr.toString(16).padStart(4,'0')}`); } catch { /* noop */ }
+            } catch { /* noop */ }
+          }
         }
         this.state.PC = target;
         break;
@@ -2601,7 +2963,8 @@ this.write16(bank, eff, 0x0000);
         this.push8((ret >>> 8) & 0xff);
         this.push8(ret & 0xff);
         if (this.stackLogEnabled) {
-          const fromPC = (pcBefore - 1 /* opcode already fetched */ - 3 /* operands */) & 0xffff;
+          // Record the call site PC as the JSL opcode address (prevPC), which is pcBefore-1 here.
+          const fromPC = (pcBefore - 1) & 0xffff;
           this.callFrames.push({ type: 'JSL', fromPBR: pbrBefore & 0xff, fromPC, toPBR: targetBank & 0xff, toPC: targetAddr & 0xffff, sAtCall: this.state.S & 0xffff });
           this.recordStackEvent({ kind: 'evt', evt: 'JSL', fromPBR: pbrBefore & 0xff, fromPC, toPBR: targetBank & 0xff, toPC: targetAddr & 0xffff, S: this.state.S & 0xffff });
         }
@@ -2643,12 +3006,27 @@ this.write16(bank, eff, 0x0000);
         const bank = this.pull8();
         const addr = ((hi << 8) | lo) & 0xffff;
         const newPC = (addr + 1) & 0xffff;
+        // If we are tracking call frames, verify that this RTL matches the most recent JSL site
         if (this.stackLogEnabled) {
-          this.recordStackEvent({ kind: 'evt', evt: 'RTL', fromPBR: this.state.PBR & 0xff, fromPC: ((this.state.PC - 1) & 0xffff), toPBR: bank & 0xff, toPC: newPC & 0xffff, S_before: sBefore, S_after: this.state.S & 0xffff });
-          // Pop the most recent JSL frame if present
-          for (let i = this.callFrames.length - 1; i >= 0; i--) {
-            if (this.callFrames[i]?.type === 'JSL') { this.callFrames.splice(i, 1); break; }
+          // Check top JSL frame for consistency
+          const top = this.callFrames[this.callFrames.length - 1];
+          if (top && top.type === 'JSL') {
+            const expected = (top.fromPC + 4) & 0xffff; // JSL is 4 bytes; return to next instruction
+            const expectedBank = top.fromPBR & 0xff; // RTL restores caller's PBR that was pushed by JSL
+            if (expected !== newPC || ((bank & 0xff) !== expectedBank)) {
+              this.recordStackEvent({ kind: 'evt', evt: 'CALL_MISMATCH', expectedPC: expected, actualPC: newPC, expectedPBR: expectedBank, actualPBR: bank & 0xff, topFrom: top.fromPC, topTo: top.toPC, S_before: sBefore, S_after: this.state.S & 0xffff });
+              if (this.debugEnabled) {
+                try {
+                  const hx = (n: number, w: number) => (n & ((1<< (w*4)) - 1)).toString(16).toUpperCase().padStart(w,'0');
+                  // eslint-disable-next-line no-console
+                  console.log(`[CALL_MISMATCH:RTL] exp=${hx(expected,4)} expPBR=${hx(expectedBank,2)} gotPC=${hx(newPC,4)} gotPBR=${hx(bank & 0xff,2)} from=${hx(top.fromPBR,2)}:${hx(top.fromPC,4)} to=${hx(top.toPBR,2)}:${hx(top.toPC,4)} S=${hx(sBefore,4)}->${hx(this.state.S & 0xffff,4)}`);
+                } catch { /* noop */ }
+              }
+            }
+            // Pop the matching JSL frame
+            this.callFrames.pop();
           }
+          this.recordStackEvent({ kind: 'evt', evt: 'RTL', fromPBR: this.state.PBR & 0xff, fromPC: ((this.state.PC - 1) & 0xffff), toPBR: bank & 0xff, toPC: newPC & 0xffff, S_before: sBefore, S_after: this.state.S & 0xffff });
         }
         if (this.debugEnabled) {
           this.dbg(`[RTL] -> bank=${bank.toString(16).padStart(2,'0')} addr=${addr.toString(16).padStart(4,'0')} nextPC=${newPC.toString(16).padStart(4,'0')}`);
@@ -2693,11 +3071,16 @@ this.write16(bank, eff, 0x0000);
         const addr = ((hi << 8) | lo) & 0xffff;
         const newPC = (addr + 1) & 0xffff;
         if (this.stackLogEnabled) {
-          this.recordStackEvent({ kind: 'evt', evt: 'RTS', fromPBR: this.state.PBR & 0xff, fromPC: ((this.state.PC - 1) & 0xffff), toPBR: this.state.PBR & 0xff, toPC: newPC & 0xffff, S_before: sBefore, S_after: this.state.S & 0xffff });
-          // Pop the most recent JSR frame if present
-          for (let i = this.callFrames.length - 1; i >= 0; i--) {
-            if (this.callFrames[i]?.type === 'JSR') { this.callFrames.splice(i, 1); break; }
+          // Check top JSR frame for consistency
+          const top = this.callFrames[this.callFrames.length - 1];
+          if (top && top.type === 'JSR') {
+            const expected = (top.fromPC + 3) & 0xffff;
+            if (expected !== newPC) {
+              this.recordStackEvent({ kind: 'evt', evt: 'CALL_MISMATCH', expected, actual: newPC, topFrom: top.fromPC, topTo: top.toPC, S_before: sBefore, S_after: this.state.S & 0xffff });
+            }
+            this.callFrames.pop();
           }
+          this.recordStackEvent({ kind: 'evt', evt: 'RTS', fromPBR: this.state.PBR & 0xff, fromPC: ((this.state.PC - 1) & 0xffff), toPBR: this.state.PBR & 0xff, toPC: newPC & 0xffff, S_before: sBefore, S_after: this.state.S & 0xffff });
         }
         this.state.PC = newPC;
         break;
@@ -3872,12 +4255,48 @@ const v = this.read16(this.state.DBR, addr);
       case 0x85: { // STA dp
         const dp = this.fetch8();
         const eff = this.dpAddr(dp);
+        // Internal store overhead (approx)
+        try {
+          const env = (globalThis as any).process?.env ?? {};
+          const stExtra = Number(env.CPU_STORE_EXTRA_CYC ?? '1') | 0;
+          this.tickInternal(stExtra);
+        } catch { /* noop */ }
         if (this.m8) {
           const value = this.state.A & 0xff;
+          const P_pre = this.state.P & 0xff;
+          let preM = 0; if (this.dp21ProbeEnabled && ((dp & 0xff) === 0x21)) { preM = this.read8(0x00, eff) & 0xff; }
           this.writeDP8WithMirror(eff, value);
+          if (this.dp21ProbeEnabled && ((dp & 0xff) === 0x21)) {
+            const postM = this.read8(0x00, eff) & 0xff;
+            this.pushDp21Event({
+              kind: 'STA', op: 0x85, PBR: this.ctxPrevPBR & 0xff, PC: this.ctxPrevPC & 0xffff,
+              eff: eff & 0xffff, pre: preM & 0xff, post: postM & 0xff, value: value & 0xff,
+              P_pre, P_post: this.state.P & 0xff,
+              E: this.state.E ? 1 : 0,
+              M: (this.state.P & Flag.M) ? 1 : (this.state.E ? 1 : 0),
+              X: (this.state.P & Flag.X) ? 1 : (this.state.E ? 1 : 0),
+            });
+          }
         } else {
           const value = this.state.A & 0xffff;
+          const P_pre = this.state.P & 0xff;
+          let preM16 = 0; if (this.dp21ProbeEnabled && ((dp & 0xff) === 0x21)) {
+            const lo0 = this.read8(0x00, eff) & 0xff; const hi0 = this.read8(0x00, (eff + 1) & 0xffff) & 0xff;
+            preM16 = ((hi0 << 8) | lo0) & 0xffff;
+          }
           this.writeDP16WithMirror(eff, value & 0xffff);
+          if (this.dp21ProbeEnabled && ((dp & 0xff) === 0x21)) {
+            const loN = this.read8(0x00, eff) & 0xff; const hiN = this.read8(0x00, (eff + 1) & 0xffff) & 0xff;
+            const postM16 = ((hiN << 8) | loN) & 0xffff;
+            this.pushDp21Event({
+              kind: 'STA16', op: 0x85, PBR: this.ctxPrevPBR & 0xff, PC: this.ctxPrevPC & 0xffff,
+              eff: eff & 0xffff, pre: preM16 & 0xffff, post: postM16 & 0xffff, value: value & 0xffff,
+              P_pre, P_post: this.state.P & 0xff,
+              E: this.state.E ? 1 : 0,
+              M: (this.state.P & Flag.M) ? 1 : (this.state.E ? 1 : 0),
+              X: (this.state.P & Flag.X) ? 1 : (this.state.E ? 1 : 0),
+            });
+          }
         }
         break;
       }
@@ -4269,12 +4688,44 @@ case 0xc9: { // CMP #imm
         break;
       }
       case 0xe0: { // CPX #imm
+        // Optional targeted CPX trace around specific PCs (CPU_CPX_TRACE=1)
+        const cpxTrace = (() => {
+          try {
+            // @ts-ignore
+            const env = (globalThis as any).process?.env ?? {};
+            return env.CPU_CPX_TRACE === '1' || env.CPU_CPX_TRACE === 'true';
+          } catch { return false; }
+        })();
+        const lastPc = (() => {
+          try {
+            const g: any = globalThis as any;
+            return g.__lastPC ? { PBR: g.__lastPC.PBR|0, PC: g.__lastPC.PC|0 } : { PBR: this.state.PBR & 0xff, PC: (this.state.PC - 1) & 0xffff };
+          } catch { return { PBR: this.state.PBR & 0xff, PC: (this.state.PC - 1) & 0xffff }; }
+        })();
+        const inFocusCPX = (lastPc.PBR & 0xff) === 0x00 && ((lastPc.PC & 0xffff) === 0x8373 || (lastPc.PC & 0xffff) === 0x837f);
+
         if (this.x8) {
           const imm = this.fetch8();
-          this.cmpValues(this.state.X & 0xff, imm & 0xff, 8);
+          const preX = this.state.X & 0xff;
+          const preP = this.state.P & 0xff;
+          this.cmpValues(preX, imm & 0xff, 8);
+          if (cpxTrace && inFocusCPX) {
+            try {
+              // eslint-disable-next-line no-console
+              console.log(`[CPX #imm] ${lastPc.PBR.toString(16).padStart(2,'0')}:${lastPc.PC.toString(16).padStart(4,'0')} x8=1 X=${preX.toString(16).padStart(2,'0')} imm=${(imm & 0xff).toString(16).padStart(2,'0')} preP=${preP.toString(16).padStart(2,'0')} postP=${(this.state.P & 0xff).toString(16).padStart(2,'0')}`);
+            } catch { /* noop */ }
+          }
         } else {
           const imm = this.fetch16();
-          this.cmpValues(this.state.X & 0xffff, imm & 0xffff, 16);
+          const preX = this.state.X & 0xffff;
+          const preP = this.state.P & 0xff;
+          this.cmpValues(preX, imm & 0xffff, 16);
+          if (cpxTrace && inFocusCPX) {
+            try {
+              // eslint-disable-next-line no-console
+              console.log(`[CPX #imm] ${lastPc.PBR.toString(16).padStart(2,'0')}:${lastPc.PC.toString(16).padStart(4,'0')} x8=0 X=${preX.toString(16).padStart(4,'0')} imm=${(imm & 0xffff).toString(16).padStart(4,'0')} preP=${preP.toString(16).padStart(2,'0')} postP=${(this.state.P & 0xff).toString(16).padStart(2,'0')}`);
+            } catch { /* noop */ }
+          }
         }
         break;
       }
@@ -4376,6 +4827,7 @@ case 0xc9: { // CMP #imm
         break;
       }
 
+
       // Block move: MVP/MVN (source/dest banks immediates)
       case 0x54: { // MVP srcBank, dstBank (decrement X/Y)
         const dstBank = this.fetch8() & 0xff;
@@ -4420,7 +4872,64 @@ case 0xc9: { // CMP #imm
         throw new Error(`Unimplemented opcode: ${opcode.toString(16)}`);
     }
     // Synthetic timing tick per instruction (for CPU-only compare when enabled)
-    try { (this.bus as any)?.tickInstr?.(1); } catch { /* noop */ }
+    try {
+      const busAny = (this.bus as any);
+      // When micro-ticking per access is enabled, skip aggregated opcode tick.
+      if (!this.microTickEnabled && busAny?.tickCycles) busAny.tickCycles(opcodeCycles);
+      else if (!this.microTickEnabled && busAny?.tickInstr) busAny.tickInstr(1);
+    } catch { /* noop */ }
+  }
+
+  // Approximate cycle counts for opcodes used in tests; fallback to 2
+  private cyclesForOpcode(op: number): number {
+    switch (op & 0xff) {
+      case 0xea: return 2; // NOP
+      case 0x18: return 2; // CLC
+      case 0x78: return 2; // SEI
+      case 0xc2: return 3; // REP
+      case 0xe2: return 3; // SEP
+      case 0xa9: return this.m8 ? 2 : 3; // LDA #imm
+      case 0xa2: return this.x8 ? 2 : 3; // LDX #imm
+      case 0xa0: return this.x8 ? 2 : 3; // LDY #imm
+      case 0x85: return this.m8 ? 3 : 4; // STA dp
+      case 0x8d: return this.m8 ? 4 : 5; // STA abs
+      case 0x9c: return 5; // STZ abs
+      case 0xb5: return this.m8 ? 4 : 5; // LDA dp,X
+      case 0x48: return 3; // PHA
+      case 0x68: return 4; // PLA
+      case 0x4a: return this.m8 ? 2 : 2; // LSR A
+      case 0x20: return 6; // JSR abs
+      case 0xfc: return 8; // JSR (abs,X)
+      case 0x60: return 6; // RTS
+      case 0x22: return 8; // JSL
+      case 0x6b: return 6; // RTL
+      case 0x4c: return 3; // JMP abs
+      case 0x5c: return 4; // JML long
+      case 0x6c: return 5; // JMP (abs)
+      case 0x7c: return 6; // JMP (abs,X)
+      case 0xf0: return 2; // BEQ (base, add 1 if taken roughly)
+      case 0xd0: return 2; // BNE
+      case 0x80: return 3; // BRA
+      case 0xeb: return 3; // XBA
+      case 0x5b: return 2; // TCD
+      case 0x3b: return 2; // TSC
+      case 0x1a: return this.m8 ? 2 : 2; // INA
+      case 0xda: return this.x8 ? 3 : 4; // PHX
+      case 0xfa: return this.x8 ? 4 : 5; // PLX
+      case 0x86: return this.x8 ? 3 : 4; // STX dp
+      case 0x84: return this.x8 ? 3 : 4; // STY dp
+      case 0xc6: return this.m8 ? 5 : 6; // DEC dp
+      case 0xe0: return this.x8 ? 2 : 3; // CPX #imm
+      case 0xc0: return this.x8 ? 2 : 3; // CPY #imm
+      case 0x9a: return 2; // TXS
+      case 0xfb: return 2; // XCE
+      case 0x8f: return 5; // STA long
+      case 0xaf: return this.m8 ? 5 : 6; // LDA long
+      case 0x61: return this.m8 ? 5 : 6; // ADC (dp,X)
+      case 0x29: return this.m8 ? 2 : 3; // AND #imm
+      case 0x69: return this.m8 ? 2 : 3; // ADC #imm
+      default: return 2;
+    }
   }
 }
 

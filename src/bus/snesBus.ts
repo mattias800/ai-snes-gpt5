@@ -14,6 +14,10 @@ export class SNESBus implements IMemoryBus {
   // Used by cycle/instruction simulation modes to deliver CPU NMI without a full scheduler.
   private onVBlankStart: (() => void) | null = null;
 
+  // Optional callback invoked when HBlank state changes (enter/exit)
+  // Parameter: hblank (true if entering HBlank, false if leaving), current scanline
+  private onHBlankChange: ((hblank: boolean, scanline: number) => void) | null = null;
+
   // PPU device handling $2100-$21FF
   private ppu = new PPU();
 
@@ -1254,6 +1258,11 @@ export class SNESBus implements IMemoryBus {
     this.onVBlankStart = cb ?? null;
   }
 
+  // Allow emulator to register a callback for HBlank state changes
+  public setHBlankCallback(cb: ((hblank: boolean, scanline: number) => void) | null): void {
+    this.onHBlankChange = cb ?? null;
+  }
+
   // Instruction-based synthetic timing tick (CPU-only compare helper)
   public tickInstr(count: number = 1): void {
     if (!this.simTimingEnabled) return;
@@ -1262,28 +1271,41 @@ export class SNESBus implements IMemoryBus {
       this.ppu.startFrame();
       this.simFrameStarted = true;
       this.simInstrInScanline = 0;
+      const prevHb = this.ppu.hblank;
       this.ppu.hblank = false;
+      if (prevHb !== this.ppu.hblank) {
+        try { if (this.onHBlankChange) this.onHBlankChange(this.ppu.hblank, this.ppu.scanline); } catch { /* noop */ }
+      }
     }
     for (let i = 0; i < count; i++) {
       this.simInstrInScanline++;
       const visibleInstr = Math.max(0, this.simInstrPerScanline - this.simHBlankInstr);
-      // Visible portion
-      if (this.simInstrInScanline <= visibleInstr) {
-        this.ppu.hblank = false;
-      } else {
-        // HBlank portion
-        this.ppu.hblank = true;
+      // Visible/HBlank toggle
+      const newHb = !(this.simInstrInScanline <= visibleInstr);
+      if (newHb !== this.ppu.hblank) {
+        this.ppu.hblank = newHb;
+        try { if (this.onHBlankChange) this.onHBlankChange(this.ppu.hblank, this.ppu.scanline); } catch { /* noop */ }
       }
       // End of scanline
       if (this.simInstrInScanline >= this.simInstrPerScanline) {
         const prevScanline = this.ppu.scanline;
         this.ppu.endScanline();
         this.simInstrInScanline = 0;
+        // Leaving HBlank at end-of-line for next scanline
+        if (this.ppu.hblank) {
+          this.ppu.hblank = false;
+          try { if (this.onHBlankChange) this.onHBlankChange(this.ppu.hblank, this.ppu.scanline); } catch { /* noop */ }
+        }
         // VBlank start: set RDNMI latch regardless of enable; scheduler would also deliver CPU NMI
         if (prevScanline === 223 && this.ppu.scanline === 224) {
           this.nmiOccurred = 1;
           try { if (this.onVBlankStart) this.onVBlankStart(); } catch { /* noop */ }
         }
+        // Step APU per scanline in sim timing modes (mirror scheduler behavior)
+        try {
+          const busAny = this as any;
+          if (typeof busAny.stepApuScanline === 'function') busAny.stepApuScanline();
+        } catch { /* noop */ }
       }
     }
   }
@@ -1295,22 +1317,40 @@ export class SNESBus implements IMemoryBus {
       this.ppu.startFrame();
       this.simFrameStarted = true;
       this.simCyclesInScanline = 0;
+      const prevHb = this.ppu.hblank;
       this.ppu.hblank = false;
+      if (prevHb !== this.ppu.hblank) {
+        try { if (this.onHBlankChange) this.onHBlankChange(this.ppu.hblank, this.ppu.scanline); } catch { /* noop */ }
+      }
     }
     let c = Math.max(0, count|0);
     while (c-- > 0) {
       this.simCyclesInScanline++;
       const visible = Math.max(0, this.simCyclesPerScanline - this.simHBlankCycles);
-      this.ppu.hblank = this.simCyclesInScanline > visible;
+      const newHb = this.simCyclesInScanline > visible;
+      if (newHb !== this.ppu.hblank) {
+        this.ppu.hblank = newHb;
+        try { if (this.onHBlankChange) this.onHBlankChange(this.ppu.hblank, this.ppu.scanline); } catch { /* noop */ }
+      }
       if (this.simCyclesInScanline >= this.simCyclesPerScanline) {
         const prevScanline = this.ppu.scanline;
         this.ppu.endScanline();
         this.simCyclesInScanline = 0;
+        // Leaving HBlank at end-of-line for next scanline
+        if (this.ppu.hblank) {
+          this.ppu.hblank = false;
+          try { if (this.onHBlankChange) this.onHBlankChange(this.ppu.hblank, this.ppu.scanline); } catch { /* noop */ }
+        }
         if (prevScanline === 223 && this.ppu.scanline === 224) {
           // Latch NMI and invoke optional callback for delivery
           this.nmiOccurred = 1;
           try { if (this.onVBlankStart) this.onVBlankStart(); } catch { /* noop */ }
         }
+        // Step APU per scanline in sim timing modes
+        try {
+          const busAny = this as any;
+          if (typeof busAny.stepApuScanline === 'function') busAny.stepApuScanline();
+        } catch { /* noop */ }
       }
     }
   }
