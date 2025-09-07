@@ -1222,10 +1222,14 @@ export class CPU65C816 {
         const eff = this.dpAddr(dp);
         if (this.m8) {
           const m = this.read8(0x00, eff);
+          if (this.debugEnabled) this.dbg(`[ADC dp] m8=1 D=$${(this.state.D & 0xffff).toString(16).padStart(4,'0')} dp=$${(dp & 0xff).toString(16).padStart(2,'0')} eff=$${(eff & 0xffff).toString(16).padStart(4,'0')} A_pre=$${(this.state.A & 0xff).toString(16).padStart(2,'0')} mem=$${(m & 0xff).toString(16).padStart(2,'0')}`);
           this.adc(m);
+          if (this.debugEnabled) this.dbg(`[ADC dp] -> A=$${(this.state.A & 0xff).toString(16).padStart(2,'0')} P=$${(this.state.P & 0xff).toString(16).padStart(2,'0')}`);
         } else {
           const m = this.read16(0x00, eff);
+          if (this.debugEnabled) this.dbg(`[ADC dp] m8=0 D=$${(this.state.D & 0xffff).toString(16).padStart(4,'0')} dp=$${(dp & 0xff).toString(16).padStart(2,'0')} eff=$${(eff & 0xffff).toString(16).padStart(4,'0')} A_pre=$${(this.state.A & 0xffff).toString(16).padStart(4,'0')} mem16=$${(m & 0xffff).toString(16).padStart(4,'0')}`);
           this.adc(m);
+          if (this.debugEnabled) this.dbg(`[ADC dp] -> A=$${(this.state.A & 0xffff).toString(16).padStart(4,'0')} P=$${(this.state.P & 0xff).toString(16).padStart(2,'0')}`);
         }
         break;
       }
@@ -1443,13 +1447,17 @@ this.dbg(`[ADC abs,Y] m8=0 DBR=$${(effBank & 0xff).toString(16).padStart(2,'0')}
         const eff = this.dpAddr(dp);
         if (this.m8) {
           const m = this.read8(0x00, eff);
+          if (this.debugEnabled) this.dbg(`[SBC dp] m8=1 D=$${(this.state.D & 0xffff).toString(16).padStart(4,'0')} dp=$${(dp & 0xff).toString(16).padStart(2,'0')} eff=$${(eff & 0xffff).toString(16).padStart(4,'0')} A_pre=$${(this.state.A & 0xff).toString(16).padStart(2,'0')} mem=$${(m & 0xff).toString(16).padStart(2,'0')}`);
           this.sbc(m);
+          if (this.debugEnabled) this.dbg(`[SBC dp] -> A=$${(this.state.A & 0xff).toString(16).padStart(2,'0')} P=$${(this.state.P & 0xff).toString(16).padStart(2,'0')}`);
         } else {
-          const lo = this.read8(0x00, eff);
-          const hi = this.read8(0x00, (eff + 1) & 0xffff);
-          const m = ((hi << 8) | lo) & 0xffff;
+          const m = this.read16(0x00, eff);
+          if (this.debugEnabled) this.dbg(`[SBC dp] m8=0 D=$${(this.state.D & 0xffff).toString(16).padStart(4,'0')} dp=$${(dp & 0xff).toString(16).padStart(2,'0')} eff=$${(eff & 0xffff).toString(16).padStart(4,'0')} A_pre=$${(this.state.A & 0xffff).toString(16).padStart(4,'0')} mem16=$${(m & 0xffff).toString(16).padStart(4,'0')}`);
           this.sbc(m);
+          if (this.debugEnabled) this.dbg(`[SBC dp] -> A=$${(this.state.A & 0xffff).toString(16).padStart(4,'0')} P=$${(this.state.P & 0xff).toString(16).padStart(2,'0')}`);
         }
+        break;
+      }
         break;
       }
       case 0xf5: { // SBC dp,X
@@ -3130,16 +3138,20 @@ this.write16(bank, eff, 0x0000);
         const eff = this.dpAddr(dp);
         if (this.m8) {
           const m = this.read8(0x00, eff);
+          if (this.debugEnabled) this.dbg(`[AND dp] m8=1 D=$${(this.state.D & 0xffff).toString(16).padStart(4,'0')} dp=$${(dp & 0xff).toString(16).padStart(2,'0')} eff=$${(eff & 0xffff).toString(16).padStart(4,'0')} A_pre=$${(this.state.A & 0xff).toString(16).padStart(2,'0')} mem=$${(m & 0xff).toString(16).padStart(2,'0')}`);
           const res = (this.state.A & 0xff) & m;
           this.state.A = (this.state.A & 0xff00) | res;
           this.setZNFromValue(res, 8);
+          if (this.debugEnabled) this.dbg(`[AND dp] -> A=$${(this.state.A & 0xff).toString(16).padStart(2,'0')} P=$${(this.state.P & 0xff).toString(16).padStart(2,'0')}`);
         } else {
           const lo = this.read8(0x00, eff);
           const hi = this.read8(0x00, (eff + 1) & 0xffff);
           const m = ((hi << 8) | lo) & 0xffff;
+          if (this.debugEnabled) this.dbg(`[AND dp] m8=0 D=$${(this.state.D & 0xffff).toString(16).padStart(4,'0')} dp=$${(dp & 0xff).toString(16).padStart(2,'0')} eff=$${(eff & 0xffff).toString(16).padStart(4,'0')} A_pre=$${(this.state.A & 0xffff).toString(16).padStart(4,'0')} mem16=$${(m & 0xffff).toString(16).padStart(4,'0')}`);
           const res = (this.state.A & 0xffff) & m;
           this.state.A = res;
           this.setZNFromValue(res, 16);
+          if (this.debugEnabled) this.dbg(`[AND dp] -> A=$${(this.state.A & 0xffff).toString(16).padStart(4,'0')} P=$${(this.state.P & 0xff).toString(16).padStart(2,'0')}`);
         }
         break;
       }
@@ -3393,16 +3405,20 @@ const m = this.read16(this.state.DBR, addr);
         const eff = this.dpAddr(dp);
         if (this.m8) {
           const m = this.read8(0x00, eff);
+          if (this.debugEnabled) this.dbg(`[ORA dp] m8=1 D=$${(this.state.D & 0xffff).toString(16).padStart(4,'0')} dp=$${(dp & 0xff).toString(16).padStart(2,'0')} eff=$${(eff & 0xffff).toString(16).padStart(4,'0')} A_pre=$${(this.state.A & 0xff).toString(16).padStart(2,'0')} mem=$${(m & 0xff).toString(16).padStart(2,'0')}`);
           const res = (this.state.A & 0xff) | m;
           this.state.A = (this.state.A & 0xff00) | (res & 0xff);
           this.setZNFromValue(res, 8);
+          if (this.debugEnabled) this.dbg(`[ORA dp] -> A=$${(this.state.A & 0xff).toString(16).padStart(2,'0')} P=$${(this.state.P & 0xff).toString(16).padStart(2,'0')}`);
         } else {
           const lo = this.read8(0x00, eff);
           const hi = this.read8(0x00, (eff + 1) & 0xffff);
           const m = ((hi << 8) | lo) & 0xffff;
+          if (this.debugEnabled) this.dbg(`[ORA dp] m8=0 D=$${(this.state.D & 0xffff).toString(16).padStart(4,'0')} dp=$${(dp & 0xff).toString(16).padStart(2,'0')} eff=$${(eff & 0xffff).toString(16).padStart(4,'0')} A_pre=$${(this.state.A & 0xffff).toString(16).padStart(4,'0')} mem16=$${(m & 0xffff).toString(16).padStart(4,'0')}`);
           const res = (this.state.A & 0xffff) | m;
           this.state.A = res & 0xffff;
           this.setZNFromValue(res, 16);
+          if (this.debugEnabled) this.dbg(`[ORA dp] -> A=$${(this.state.A & 0xffff).toString(16).padStart(4,'0')} P=$${(this.state.P & 0xff).toString(16).padStart(2,'0')}`);
         }
         break;
       }
@@ -3644,16 +3660,20 @@ const m = this.read16(bank, addr);
         const eff = this.dpAddr(dp);
         if (this.m8) {
           const m = this.read8(0x00, eff);
+          if (this.debugEnabled) this.dbg(`[EOR dp] m8=1 D=$${(this.state.D & 0xffff).toString(16).padStart(4,'0')} dp=$${(dp & 0xff).toString(16).padStart(2,'0')} eff=$${(eff & 0xffff).toString(16).padStart(4,'0')} A_pre=$${(this.state.A & 0xff).toString(16).padStart(2,'0')} mem=$${(m & 0xff).toString(16).padStart(2,'0')}`);
           const res = (this.state.A & 0xff) ^ m;
           this.state.A = (this.state.A & 0xff00) | (res & 0xff);
           this.setZNFromValue(res, 8);
+          if (this.debugEnabled) this.dbg(`[EOR dp] -> A=$${(this.state.A & 0xff).toString(16).padStart(2,'0')} P=$${(this.state.P & 0xff).toString(16).padStart(2,'0')}`);
         } else {
           const lo = this.read8(0x00, eff);
           const hi = this.read8(0x00, (eff + 1) & 0xffff);
           const m = ((hi << 8) | lo) & 0xffff;
+          if (this.debugEnabled) this.dbg(`[EOR dp] m8=0 D=$${(this.state.D & 0xffff).toString(16).padStart(4,'0')} dp=$${(dp & 0xff).toString(16).padStart(2,'0')} eff=$${(eff & 0xffff).toString(16).padStart(4,'0')} A_pre=$${(this.state.A & 0xffff).toString(16).padStart(4,'0')} mem16=$${(m & 0xffff).toString(16).padStart(4,'0')}`);
           const res = (this.state.A & 0xffff) ^ m;
           this.state.A = res & 0xffff;
           this.setZNFromValue(res, 16);
+          if (this.debugEnabled) this.dbg(`[EOR dp] -> A=$${(this.state.A & 0xffff).toString(16).padStart(4,'0')} P=$${(this.state.P & 0xff).toString(16).padStart(2,'0')}`);
         }
         break;
       }
