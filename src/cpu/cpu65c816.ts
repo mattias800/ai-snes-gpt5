@@ -76,7 +76,15 @@ export class CPU65C816 {
     try {
       // @ts-ignore
       const env = (globalThis as any).process?.env ?? {};
-      return env.CPU_MICRO_TICK === '1' || env.CPU_MICRO_TICK === 'true';
+      const micro = env.CPU_MICRO_TICK === '1' || env.CPU_MICRO_TICK === 'true';
+      return micro || this.accurateCpuEnabled;
+    } catch { return false; }
+  }
+  private get accurateCpuEnabled(): boolean {
+    try {
+      // @ts-ignore
+      const env = (globalThis as any).process?.env ?? {};
+      return env.CPU_ACCURATE === '1' || env.CPU_ACCURATE === 'true';
     } catch { return false; }
   }
   private accessCycles(bank: number, addr: number, isWrite: boolean): number {
@@ -1126,6 +1134,22 @@ export class CPU65C816 {
       if (g2.__lastIR.length > 512) g2.__lastIR.shift();
     } catch { void 0; }
     const opcodeCycles = this.cyclesForOpcode(opcode & 0xff);
+
+    // Optional accurate micro-op path for a subset of opcodes
+    if (this.accurateCpuEnabled) {
+      const handled = this.execAccurateSubset(opcode & 0xff);
+      if (handled) {
+        // Skip default switch when handled by accurate path
+        try {
+          const busAny = (this.bus as any);
+          // Skip aggregated opcode tick when accurate path is active
+          // Accurate path already ticked per access; if not in micro-tick mode, we accept no-op timing here.
+          // No additional action.
+        } catch { /* noop */ }
+        return;
+      }
+    }
+
     switch (opcode) {
       // NOP (in 65C816, 0xEA)
       case 0xea:
@@ -4874,10 +4898,91 @@ case 0xc9: { // CMP #imm
     // Synthetic timing tick per instruction (for CPU-only compare when enabled)
     try {
       const busAny = (this.bus as any);
-      // When micro-ticking per access is enabled, skip aggregated opcode tick.
-      if (!this.microTickEnabled && busAny?.tickCycles) busAny.tickCycles(opcodeCycles);
-      else if (!this.microTickEnabled && busAny?.tickInstr) busAny.tickInstr(1);
+      // When micro-ticking per access is enabled OR accurate path is enabled, skip aggregated opcode tick.
+      if (!this.microTickEnabled && !this.accurateCpuEnabled && busAny?.tickCycles) busAny.tickCycles(opcodeCycles);
+      else if (!this.microTickEnabled && !this.accurateCpuEnabled && busAny?.tickInstr) busAny.tickInstr(1);
     } catch { /* noop */ }
+  }
+
+  // Accurate-path subset execution (env: CPU_ACCURATE=1)
+  private execAccurateSubset(op: number): boolean {
+    switch (op & 0xff) {
+      case 0xa9: { // LDA #imm
+        if (this.m8) {
+          const imm = this.fetch8() & 0xff;
+          this.state.A = (this.state.A & 0xff00) | imm;
+          this.setZNFromValue(imm, 8);
+        } else {
+          const imm = this.fetch16() & 0xffff;
+          this.state.A = imm & 0xffff;
+          this.setZNFromValue(imm, 16);
+        }
+        return true;
+      }
+      case 0xa5: { // LDA dp
+        const dp = this.fetch8() & 0xff;
+        const eff = this.dpAddr(dp);
+        if (this.m8) {
+          const v = this.read8(0x00, eff) & 0xff;
+          this.state.A = (this.state.A & 0xff00) | v;
+          this.setZNFromValue(v, 8);
+        } else {
+          const v = this.read16(0x00, eff) & 0xffff;
+          this.state.A = v & 0xffff;
+          this.setZNFromValue(v, 16);
+        }
+        return true;
+      }
+      case 0x85: { // STA dp
+        const dp = this.fetch8() & 0xff;
+        const eff = this.dpAddr(dp);
+        // small internal overhead if micro-tick mode is on
+        this.tickInternal(Number(((globalThis as any).process?.env?.CPU_STORE_EXTRA_CYC ?? '1'))|0);
+        if (this.m8) {
+          this.write8(0x00, eff, this.state.A & 0xff);
+        } else {
+          const a = this.state.A & 0xffff;
+          this.write8(0x00, eff, a & 0xff);
+          this.write8(0x00, (eff + 1) & 0xffff, (a >>> 8) & 0xff);
+        }
+        return true;
+      }
+      case 0x65: { // ADC dp
+        const dp = this.fetch8() & 0xff;
+        const eff = this.dpAddr(dp);
+        if (this.m8) {
+          const m = this.read8(0x00, eff) & 0xff;
+          this.adc(m);
+        } else {
+          const m = this.read16(0x00, eff) & 0xffff;
+          this.adc(m);
+        }
+        return true;
+      }
+      case 0xc6: { // DEC dp
+        const dp = this.fetch8() & 0xff;
+        const eff = this.dpAddr(dp);
+        if (this.m8) {
+          const pre = this.read8(0x00, eff) & 0xff;
+          this.tickInternal(Number(((globalThis as any).process?.env?.CPU_RMW_EXTRA_CYC ?? '2'))|0);
+          const m = (pre - 1) & 0xff;
+          this.write8(0x00, eff, m);
+          this.setZNFromValue(m, 8);
+        } else {
+          const lo = this.read8(0x00, eff) & 0xff;
+          const hi = this.read8(0x00, (eff + 1) & 0xffff) & 0xff;
+          const pre = ((hi << 8) | lo) & 0xffff;
+          this.tickInternal(Number(((globalThis as any).process?.env?.CPU_RMW_EXTRA_CYC ?? '3'))|0);
+          const m = (pre - 1) & 0xffff;
+          this.write8(0x00, eff, m & 0xff);
+          this.write8(0x00, (eff + 1) & 0xffff, (m >>> 8) & 0xff);
+          this.setZNFromValue(m, 16);
+        }
+        return true;
+      }
+      default:
+        return false;
+    }
   }
 
   // Approximate cycle counts for opcodes used in tests; fallback to 2

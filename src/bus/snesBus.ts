@@ -197,6 +197,12 @@ export class SNESBus implements IMemoryBus {
       // Enable cycle-based mode when SNES_TIMING_MODE=cycles
       const simMode = (env.SNES_TIMING_MODE ?? '').toString().toLowerCase();
       this.simCycleMode = simMode === 'cycles';
+      // Accuracy scaffold: SNES_ACCURATE=1 turns on synthetic timing (cycle mode) to drive H/V transitions
+      const acc = (env.SNES_ACCURATE ?? '0').toString().toLowerCase();
+      if (acc === '1' || acc === 'true') {
+        this.simTimingEnabled = true;
+        this.simCycleMode = true;
+      }
       const ips = Number(env.SNES_TIMING_IPS ?? '100');
       if (Number.isFinite(ips) && ips >= 1 && ips <= 100000) this.simInstrPerScanline = (ips|0);
       const hfrac = Number(env.SNES_TIMING_HBLANK_FRAC ?? '8');
